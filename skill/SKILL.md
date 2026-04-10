@@ -51,7 +51,7 @@ if [ -n "$MINDVAULT_BIN" ]; then
 else
     PYTHON="python3"
 fi
-"$PYTHON" -c "import mindvault" 2>/dev/null || "$PYTHON" -m pip install mindvault -q 2>/dev/null || "$PYTHON" -m pip install mindvault -q --break-system-packages 2>&1 | tail -3
+"$PYTHON" -c "import mindvault" 2>/dev/null || "$PYTHON" -m pip install mindvault-ai -q 2>/dev/null || "$PYTHON" -m pip install mindvault-ai -q --break-system-packages 2>&1 | tail -3
 mkdir -p mindvault-out
 "$PYTHON" -c "import sys; open('mindvault-out/.mindvault_python', 'w').write(sys.executable)"
 ```

@@ -2,7 +2,7 @@
 
 ## Project Summary
 MindVault — 토큰 절약 + 세션 연속성을 위한 3-Layer 지식 관리 도구.
-PyPI 독립 패키지. `pip install mindvault && mindvault install`
+PyPI 독립 패키지. `pip install mindvault-ai && mindvault install`
 
 ## Steps
 

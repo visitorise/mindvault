@@ -4,8 +4,8 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/mindvault/"><img src="https://img.shields.io/pypi/v/mindvault?color=blue" alt="PyPI"></a>
-  <img src="https://img.shields.io/pypi/pyversions/mindvault" alt="Python 3.10+">
+  <a href="https://pypi.org/project/mindvault-ai/"><img src="https://img.shields.io/pypi/v/mindvault-ai?color=blue" alt="PyPI"></a>
+  <img src="https://img.shields.io/pypi/pyversions/mindvault-ai" alt="Python 3.10+">
   <img src="https://img.shields.io/github/license/etinpres/mindvault" alt="MIT License">
 </p>
 
