@@ -92,9 +92,24 @@ mindvault install
 pip install mindvault-ai
 cd ~/your-project
 mindvault install .    # hooks + 데몬 자동 등록 (5분마다 변경 감지)
-mindvault ingest .     # 초기 지식 베이스 구축 (최초 1회)
 ```
 
+초기 지식 베이스 구축은 두 가지 방법이 있습니다:
+
+```bash
+# 방법 A: 단일 프로젝트만 빌드
+mindvault ingest .
+
+# 방법 B: 여러 프로젝트를 한번에 통합 빌드
+mindvault global ~/projects
+```
+
+| 명령어 | 대상 | 용도 |
+|--------|------|------|
+| `mindvault ingest .` | 현재 폴더 1개 | 특정 프로젝트만 빠르게 빌드 |
+| `mindvault global <root>` | 하위 모든 프로젝트 | 프로젝트 간 관계까지 통합 빌드 |
+
+> 초기 빌드 이후에는 데몬이 5분마다 변경 사항을 자동 감지하여 업데이트합니다.
 > 데몬이 필요 없으면 `mindvault install . --no-daemon`
 
 ### 2. 사용

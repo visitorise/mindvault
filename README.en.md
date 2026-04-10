@@ -92,9 +92,24 @@ What `mindvault install` performs automatically:
 pip install mindvault-ai
 cd ~/your-project
 mindvault install .    # hooks + daemon auto-registered (checks every 5 min)
-mindvault ingest .     # initial knowledge base build (one-time)
 ```
 
+Two ways to build the initial knowledge base:
+
+```bash
+# Option A: Build a single project
+mindvault ingest .
+
+# Option B: Build all projects at once
+mindvault global ~/projects
+```
+
+| Command | Scope | Use case |
+|---------|-------|----------|
+| `mindvault ingest .` | Current folder only | Quick build for one project |
+| `mindvault global <root>` | All sub-projects | Unified build with cross-project relationships |
+
+> After the initial build, the daemon auto-detects changes every 5 minutes.
 > Skip daemon with `mindvault install . --no-daemon`
 
 ### 2. Use
