@@ -114,16 +114,17 @@ mindvault status
 ## How It Works
 
 ```
-Source File / URL / PDF
+Source File / URL / PDF / Documents
         |
         v
-  [1. Detect]     -- Scans code/document files, automatically detects project with 14 marker files
+  [1. Detect]     -- Scans code/document/PDF/image files, auto-detects projects via 14 marker files
         |
         v
-  [2. Extract]    -- tree-sitter AST → Nodes (function, class, module) + Edges (call, import)
-        |
+  [2. Extract]    -- Code: tree-sitter AST (functions, classes, imports)
+        |             Documents: structure extraction (header hierarchy, links, code blocks) ← No LLM needed
+        |             PDF: section structure extraction
         v
-  [3. Semantic]   -- Extracts Why/How/Intent using LLM (Optional)
+  [3. Semantic]   -- LLM analyzes meaning/intent (optional, applies to both code and docs)
         |
         v
   [4. Build]      -- Constructs NetworkX DiGraph, filters dangling edges
@@ -140,6 +141,8 @@ Source File / URL / PDF
         v
     mindvault-out/
 ```
+
+> **Note**: Step 2 (Extract) automatically branches by input type. Code files go through AST analysis, documents/PDFs go through structure extraction. Both paths require zero LLM calls and zero tokens. Step 3 (Semantic) only runs when an LLM is available and applies to both code and documents.
 
 ### Output Directory Structure
 

@@ -114,16 +114,17 @@ mindvault status
 ## 동작 원리
 
 ```
-소스 파일 / URL / PDF
+소스 파일 / URL / PDF / 문서
         |
         v
-  [1. Detect]     -- 코드/문서 파일 탐색, 14개 마커 파일로 프로젝트 자동 감지
+  [1. Detect]     -- 코드/문서/PDF/이미지 파일 탐색, 14개 마커 파일로 프로젝트 자동 감지
         |
         v
-  [2. Extract]    -- tree-sitter AST → 노드(함수, 클래스, 모듈) + 엣지(호출, 임포트)
-        |
+  [2. Extract]    -- 코드: tree-sitter AST (함수, 클래스, import)
+        |             문서: 구조 추출 (헤더 계층, 링크, 코드블록) ← LLM 불필요
+        |             PDF: 섹션 구조 추출
         v
-  [3. Semantic]   -- LLM으로 Why/How/의도 추출 (선택사항)
+  [3. Semantic]   -- LLM으로 의미/의도 분석 (선택사항, 코드+문서 모두)
         |
         v
   [4. Build]      -- NetworkX DiGraph 구축, 댕글링 엣지 필터링
@@ -140,6 +141,8 @@ mindvault status
         v
     mindvault-out/
 ```
+
+> **참고**: 2단계(Extract)는 입력 유형에 따라 자동 분기합니다. 코드 파일은 AST 분석, 문서/PDF는 구조 추출을 수행합니다. 두 경로 모두 LLM이 필요하지 않으며 토큰 소비 0입니다. 3단계(Semantic)는 LLM이 있을 때만 실행되며, 코드와 문서 모두에 적용됩니다.
 
 ### 출력 디렉토리 구조
 
