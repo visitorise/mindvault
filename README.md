@@ -86,12 +86,20 @@ mindvault install
 
 ## 빠른 시작
 
-### CLI 사용
+### 1. 설치 및 초기화
 
 ```bash
-# 현재 프로젝트의 지식 베이스 구축
-mindvault ingest .
+pip install mindvault-ai
+cd ~/your-project
+mindvault install .    # hooks + 데몬 자동 등록 (5분마다 변경 감지)
+mindvault ingest .     # 초기 지식 베이스 구축 (최초 1회)
+```
 
+> 데몬이 필요 없으면 `mindvault install . --no-daemon`
+
+### 2. 사용
+
+```bash
 # 3-layer 통합 질의
 mindvault query "인증은 어떻게 동작하나요?"
 

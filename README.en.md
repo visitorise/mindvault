@@ -86,12 +86,20 @@ What `mindvault install` performs automatically:
 
 ## Quick Start
 
-### CLI Usage
+### 1. Install & Initialize
 
 ```bash
-# Build the knowledge base of the current project
-mindvault ingest .
+pip install mindvault-ai
+cd ~/your-project
+mindvault install .    # hooks + daemon auto-registered (checks every 5 min)
+mindvault ingest .     # initial knowledge base build (one-time)
+```
 
+> Skip daemon with `mindvault install . --no-daemon`
+
+### 2. Use
+
+```bash
 # 3-layer integrated query
 mindvault query "How does authentication work?"
 

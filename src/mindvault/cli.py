@@ -71,6 +71,21 @@ def cmd_install(args) -> None:
     else:
         print(f"  \u2717 Auto-context hook \u2014 installation failed")
 
+    # 6. Install daemon (auto-update every 5 min) unless --no-daemon
+    if not getattr(args, "no_daemon", False):
+        from mindvault.daemon import install_daemon, daemon_status
+        status = daemon_status()
+        if status.get("installed") and status.get("running"):
+            print(f"  \u2713 Daemon \u2014 already running (skip)")
+        else:
+            success = install_daemon(project_root)
+            if success:
+                print(f"  \u2713 Daemon \u2014 installed (auto-updates every 5 min)")
+            else:
+                print(f"  \u2717 Daemon \u2014 installation failed")
+    else:
+        print(f"  \u2014 Daemon \u2014 skipped (--no-daemon)")
+
     print("\nMindVault is ready. Run `mindvault ingest .` to build your knowledge base.")
 
 
@@ -425,6 +440,7 @@ def main() -> None:
     # install
     sub_install = subparsers.add_parser("install", help="Install hooks and initialize MindVault in a project")
     sub_install.add_argument("path", nargs="?", default=".", help="Project root path")
+    sub_install.add_argument("--no-daemon", action="store_true", help="Skip daemon installation")
 
     # query
     sub_query = subparsers.add_parser("query", help="Query the knowledge graph")
