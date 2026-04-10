@@ -486,5 +486,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.1.0 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.1.3 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
