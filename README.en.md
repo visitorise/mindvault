@@ -112,6 +112,20 @@ mindvault global ~/projects
 > After the initial build, the daemon auto-detects changes every 5 minutes.
 > Skip daemon with `mindvault install . --no-daemon`
 
+#### Indexing Files Outside the Root Folder
+
+You can manually ingest files/folders outside the root path with `mindvault ingest`:
+
+```bash
+# Example: index config scripts in your home directory
+mindvault ingest ~/.config/my-tool/
+
+# Example: index docs from another location
+mindvault ingest /opt/docs/api-reference/
+```
+
+> **Note:** Paths outside the root folder are not monitored by the daemon. If those files change, you need to run `mindvault ingest` again manually.
+
 ### 2. Use
 
 ```bash

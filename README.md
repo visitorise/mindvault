@@ -112,6 +112,20 @@ mindvault global ~/projects
 > 초기 빌드 이후에는 데몬이 5분마다 변경 사항을 자동 감지하여 업데이트합니다.
 > 데몬이 필요 없으면 `mindvault install . --no-daemon`
 
+#### 루트 폴더 밖의 파일 인덱싱
+
+루트 경로 밖에 있는 파일/폴더도 `mindvault ingest`로 수동 인덱싱할 수 있습니다:
+
+```bash
+# 예: 홈 디렉토리의 설정 스크립트 인덱싱
+mindvault ingest ~/.config/my-tool/
+
+# 예: 다른 경로의 문서 폴더 인덱싱
+mindvault ingest /opt/docs/api-reference/
+```
+
+> **주의:** 루트 폴더 밖의 경로는 데몬 자동 감시 대상에 포함되지 않습니다. 해당 파일이 변경되면 `mindvault ingest`를 다시 실행해야 합니다.
+
 ### 2. 사용
 
 ```bash
