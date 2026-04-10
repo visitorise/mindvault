@@ -96,6 +96,25 @@ PyPI 독립 패키지. `pip install mindvault && mindvault install`
   - `watch.py`: mtime polling with configurable debounce. Code changes trigger `run_incremental`, doc changes only `mark_dirty`
   - `cli.py`: extended existing argparse with 3 new subcommands (update, mark-dirty, flush). All original subcommands now have real implementations
 
+### Step 6 — SKILL.md Completion + Deployment Preparation ✅
+- **Builder**: Bob
+- **Date**: 2026-04-10
+- **Status**: COMPLETE
+- **Files created/modified**: 3 (skill/SKILL.md rewritten, README.md rewritten, .gitignore created)
+- **Verification** (all 7 tests PASS):
+  - Test 1: `mindvault ingest src` — 91 nodes, 146 edges, 10 communities, 11 wiki pages, 11 indexed docs — PASS
+  - Test 2: `mindvault query "how does the search layer work"` — 3-layer output, 1992 tokens — PASS
+  - Test 3: `mindvault status` — 91 nodes, 146 edges, 10 communities, 11 wiki pages, 11 docs — PASS
+  - Test 4: `mindvault lint` — 11 pages, 288 broken wikilinks (node-level, expected), 0 orphans, 0 ambiguous — PASS
+  - Test 5: `mindvault install` — skill copied, CLAUDE.md registered — PASS
+  - Test 6: Output files — graph.json, graph.html, GRAPH_REPORT.md, wiki/INDEX.md, search_index.json, 10 community pages — PASS
+  - Test 7: `git init` + first commit `57e6c05` — 32 files, .gitignore excludes mindvault-out/ — PASS
+- **Key decisions**:
+  - SKILL.md follows Graphify pattern: YAML frontmatter, step-by-step bash blocks with Python one-liners, interpreter detection via `.mindvault_python` file
+  - SKILL.md covers all subcommands: full pipeline, query, lint, status, ingest, install
+  - README.md includes token savings table, 3-layer diagram, full commands table
+  - Git commit does NOT push (user creates GitHub repo first)
+
 ## Known Gaps
 
 - Cross-file call/import resolution: imports create edges to `{module}_module` IDs which may or may not exist as nodes; dangling ones are filtered by `build_graph`
