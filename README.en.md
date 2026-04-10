@@ -74,6 +74,7 @@ What `mindvault install` performs automatically:
 - Creates integrated configuration files for each tool
 - Installs Git post-commit hook (auto-updates on commit)
 - Registers Claude Code `/mindvault` Skill
+- **Installs auto-context hook** — automatically injects MindVault context into every query (system-level)
 
 ### Requirements
 
@@ -356,6 +357,42 @@ MindVault uses a **SHA256 hash-based incremental cache**. It does not reprocess 
 - Git post-commit hook automatically runs `mindvault update` upon commit.
 - Only changed files are re-extracted → Graph/Wiki/Index updated.
 - Real-time monitoring is also possible with `mindvault watch` (polling-based).
+
+---
+
+## Auto-Context Hook (The Key to Session Continuity)
+
+The most important feature of MindVault. When you run `mindvault install`, a **system-level hook** is installed that makes the AI **automatically** reference MindVault on every question.
+
+```
+User: "How does the Telegram bot handle comments on videos?"
+  ↓ (System auto-executes — not the AI's choice)
+  mindvault query "How does the Telegram bot handle comments?" --global
+  ↓
+  <mindvault-context> search results + graph + wiki </mindvault-context>
+  ↓
+AI: Already has context, gives accurate answer
+```
+
+- Short messages under 10 chars are auto-skipped
+- 5-second timeout prevents response delay
+- Slash commands (`/`) are also skipped
+
+Without this hook, the AI must "voluntarily" follow CLAUDE.md instructions — which it sometimes ignores. The hook is **system-enforced**, so the AI cannot forget.
+
+---
+
+## Memory Integration
+
+During global builds (`mindvault global`), Claude Code's `~/.claude/projects/*/memory/*.md` files are automatically included in the search index. Code analysis results and project memories are merged into a **single unified search index**.
+
+```
+Search: "telegram bot"
+  → Code analysis (tg_notify.sh related nodes)
+  → MEMORY.md (custom bot decision records)
+  → Wiki pages (TTS pipeline relationships)
+  = All sources unified
+```
 
 ---
 

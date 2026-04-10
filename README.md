@@ -74,6 +74,7 @@ mindvault install
 - 각 도구별 통합 설정 파일 생성
 - Git post-commit hook 설치 (커밋마다 자동 갱신)
 - Claude Code `/mindvault` Skill 등록
+- **Auto-context hook 설치** — 모든 질문에 MindVault 컨텍스트 자동 주입 (시스템 레벨)
 
 ### 요구사항
 
@@ -356,6 +357,42 @@ MindVault는 **SHA256 해시 기반 incremental 캐시**를 사용합니다. 파
 - Git post-commit hook이 커밋 시 `mindvault update` 자동 실행
 - 변경된 파일만 재추출 → 그래프/위키/인덱스 갱신
 - `mindvault watch`로 실시간 감시도 가능 (polling 기반)
+
+---
+
+## Auto-Context Hook (세션 연속성의 핵심)
+
+MindVault의 가장 중요한 기능입니다. `mindvault install` 시 **시스템 레벨 hook**이 설치되어, 사용자가 질문할 때마다 AI가 **자동으로** MindVault를 참조합니다.
+
+```
+사용자: "텔레그램 봇 영상에 달린 댓글 어떻게 답해?"
+  ↓ (시스템이 자동 실행 — AI의 선택이 아님)
+  mindvault query "텔레그램 봇 영상에 달린 댓글 어떻게 답해?" --global
+  ↓
+  <mindvault-context> 검색결과 + 그래프 + 위키 </mindvault-context>
+  ↓
+AI: 이미 맥락을 받았으므로 정확한 답변
+```
+
+- 10자 미만 짧은 메시지("ㅇㅇ", "해")는 자동 skip
+- 5초 timeout으로 응답 지연 없음
+- `/` 로 시작하는 skill 명령어도 skip
+
+이 hook이 없으면 AI는 CLAUDE.md의 지시를 "자발적으로" 따라야 하는데, 가끔 무시합니다. Hook은 **시스템이 강제**하므로 AI가 까먹을 수 없습니다.
+
+---
+
+## 메모리 통합
+
+글로벌 빌드(`mindvault global`) 시 Claude Code의 `~/.claude/projects/*/memory/*.md` 파일도 자동으로 검색 인덱스에 포함됩니다. 코드 분석 결과와 프로젝트 메모리가 **하나의 검색 인덱스**로 통합되어, 정보가 어디에 있든 한번에 찾을 수 있습니다.
+
+```
+검색: "텔레그램 봇"
+  → 코드 분석 결과 (tg_notify.sh 관련 노드)
+  → MEMORY.md (커스텀 봇 결정 기록)
+  → 위키 페이지 (TTS 파이프라인 연결 관계)
+  = 모든 소스 통합
+```
 
 ---
 
