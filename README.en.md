@@ -65,7 +65,7 @@ MindVault integrates the advantages of these three into **one installation line 
 ## Installation
 
 ```bash
-pip install mindvault
+pip install mindvault-ai
 mindvault install
 ```
 
@@ -365,7 +365,7 @@ MindVault uses a **SHA256 hash-based incremental cache**. It does not reprocess 
 
 ```bash
 cd my-project
-pip install mindvault
+pip install mindvault-ai
 mindvault install          # AI Tool Integration + Git hook
 mindvault ingest .         # Full build
 mindvault status           # Check results

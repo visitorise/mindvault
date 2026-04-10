@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/mindvault/"><img src="https://img.shields.io/pypi/v/mindvault?color=blue" alt="PyPI"></a>
+  <a href="https://pypi.org/project/mindvault/"><img src="https://img.shields.io/pypi/v/mindvault-ai?color=blue" alt="PyPI"></a>
   <img src="https://img.shields.io/pypi/pyversions/mindvault" alt="Python 3.10+">
   <img src="https://img.shields.io/github/license/etinpres/mindvault" alt="MIT License">
 </p>
@@ -65,7 +65,7 @@ MindVault는 이 3개의 장점을 **설치 한 줄, 설정 제로**로 통합�
 ## 설치
 
 ```bash
-pip install mindvault
+pip install mindvault-ai
 mindvault install
 ```
 
@@ -365,7 +365,7 @@ MindVault는 **SHA256 해시 기반 incremental 캐시**를 사용합니다. 파
 
 ```bash
 cd my-project
-pip install mindvault
+pip install mindvault-ai
 mindvault install          # AI 도구 연동 + Git hook
 mindvault ingest .         # 전체 빌드
 mindvault status           # 결과 확인
