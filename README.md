@@ -205,9 +205,11 @@ mindvault-out/
 |--------|------|
 | `mindvault global <root>` | 모든 하위 프로젝트 통합 빌드 |
 | `mindvault global <root> --discover` | 프로젝트 목록만 출력 (빌드 안 함) |
-| `mindvault global <root> --daemon` | 빌드 + 데몬 등록 |
+| `mindvault global <root> --daemon` | 빌드 + 데몬 등록 (install에서 이미 등록된 경우 불필요) |
 
 ### 데몬 관리
+
+> 데몬은 `mindvault install` 시 자동 등록됩니다. 아래 명령어로 상태 확인/관리할 수 있습니다.
 
 | 명령어 | 설명 |
 |--------|------|
@@ -343,7 +345,7 @@ mindvault config show
 
 ## 크로스 플랫폼 데몬
 
-`mindvault global <root> --daemon`으로 등록하면, OS별 네이티브 서비스 매니저를 사용해 백그라운드에서 자동 갱신합니다.
+`mindvault install`을 실행하면 데몬이 자동 등록됩니다. `mindvault global <root> --daemon`으로도 등록할 수 있습니다. OS별 네이티브 서비스 매니저를 사용해 5분마다 변경 사항을 자동 감지하고 업데이트합니다.
 
 | OS | 서비스 매니저 | 비고 |
 |----|-------------|------|
@@ -493,7 +495,7 @@ mindvault global ~/projects --discover
 # 전체 빌드
 mindvault global ~/projects
 
-# 빌드 + 데몬 등록 (백그라운드 자동 갱신)
+# 빌드 + 데몬 등록 (install에서 이미 등록된 경우 불필요)
 mindvault global ~/projects --daemon
 
 # 크로스 프로젝트 질의

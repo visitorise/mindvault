@@ -205,9 +205,11 @@ mindvault-out/
 |--------|------|
 | `mindvault global <root>` | Builds all sub-projects into one |
 | `mindvault global <root> --discover` | Outputs project list only (no build) |
-| `mindvault global <root> --daemon` | Build + Daemon registration |
+| `mindvault global <root> --daemon` | Build + daemon registration (not needed if already registered via install) |
 
 ### Daemon Management
+
+> The daemon is automatically registered during `mindvault install`. Use these commands to check status or manage it.
 
 | Command | Description |
 |--------|------|
@@ -343,7 +345,7 @@ When automatically discovering sub-projects in Global Mode (`mindvault global`),
 
 ## Cross-Platform Daemon
 
-Registering with `mindvault global <root> --daemon` enables automatic background updates using the OS's native service manager.
+The daemon is automatically registered during `mindvault install`. You can also register it with `mindvault global <root> --daemon`. It uses the OS's native service manager to auto-detect changes every 5 minutes.
 
 | OS | Service Manager | Notes |
 |----|-------------|------|
@@ -493,7 +495,7 @@ mindvault global ~/projects --discover
 # Full build
 mindvault global ~/projects
 
-# Build + Daemon Registration (Background automatic updates)
+# Build + daemon registration (not needed if already registered via install)
 mindvault global ~/projects --daemon
 
 # Cross-Project Query
