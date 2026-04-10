@@ -8,12 +8,12 @@ from pathlib import Path
 _GIT_HOOK_MARKER = "# MindVault auto-update"
 _GIT_HOOK_CONTENT = """
 # MindVault auto-update
-mindvault-update() {
+mindvault_update() {
   if command -v mindvault &>/dev/null; then
     mindvault update --quiet &
   fi
 }
-mindvault-update
+mindvault_update
 """
 
 DIRTY_FILENAME = ".mindvault_dirty.json"
