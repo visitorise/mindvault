@@ -180,11 +180,65 @@ PyPI 독립 패키지. `pip install mindvault && mindvault install`
   - `ingest.py` supports file/URL/directory ingestion with HTML stripping for URLs
   - All uses `urllib.request` only — zero `requests` dependency
 
+### Step 10 — Karpathy Wiki Pattern: Incremental Knowledge Accumulation ✅
+- **Builder**: Bob
+- **Date**: 2026-04-09
+- **Status**: COMPLETE
+- **Files modified**: 5 (wiki.py, compile.py, query.py, lint.py, ingest.py)
+- **Verification** (all 5 tests PASS):
+  - Test 1: First build → `_concepts.json` created, 191 nodes, 26 pages — PASS
+  - Test 2: Second build with `<!-- user-notes -->` → user notes preserved after rebuild — PASS
+  - Test 3: `query('search layer', save=True)` → `wiki/queries/` created with saved query — PASS
+  - Test 4: `lint_wiki` → contradictions: 3, orphan_concepts: 0, stale_pages: 0 — PASS
+  - Test 5: `ingest(README.md)` → `wiki/ingested/` created, 10 nodes extracted — PASS
+- **Key decisions**:
+  - `wiki.py`: `update_wiki` fully implemented — re-derives communities from graph, identifies affected communities from `changed_nodes`, regenerates only those pages while preserving `<!-- user-notes -->` sections via `merge_wiki_page`
+  - `wiki.py`: `_concepts.json` built from graph communities (concept label → page filenames), preserved across ingested/query entries on rebuild
+  - `compile.py`: checks for `wiki/_concepts.json` existence to decide between `generate_wiki` (first build) and `update_wiki` (subsequent builds)
+  - `query.py`: `save=True` writes to `wiki/queries/{date}-{slug}.md` with answer context, search results, graph context, and sources; updates `_concepts.json` and search index
+  - `lint.py`: contradiction detection compares snippets across pages sharing a concept (string comparison, no LLM); orphan concepts check `_concepts.json` entries unreferenced in any wiki content; stale pages check for deleted source files
+  - `ingest.py`: after LLM extraction, creates wiki pages in `wiki/ingested/` for new concepts, appends to `## Ingested Sources` section for existing concepts; updates `_concepts.json` and search index; falls back to metadata-only page if no LLM available
+
+### Step 11 — Karpathy Pattern Completion (3 fixes) ✅
+- **Builder**: Bob
+- **Date**: 2026-04-09
+- **Status**: COMPLETE
+- **Files modified**: 4 (compile.py, lint.py, ingest.py, wiki.py)
+- **Verification** (all 4 tests PASS):
+  - Test 1: BUG-2 incremental update — First build 38 pages, second build 0 pages (no changes), user note preserved — PASS
+  - Test 2: BUG-1 stale pages — `stale_pages` now appears in lint result dict — PASS
+  - Test 3: Contradiction detection — `llm_verified` field added, local LLM only — PASS
+  - Test 4: Ingest auto-classification — 8 merged to existing, 2 new pages — PASS
+- **Key decisions**:
+  - `compile.py`: `_find_changed_nodes()` compares old graph.json with new graph. Checks: node added/deleted, edge changes (successors diff), source_file change. Deleted nodes trigger refresh of their old neighbors' communities.
+  - `lint.py` BUG-1: `stale_pages` was computed but never appended to — fixed `all_deleted` conditional to actually append to `stale_pages` list
+  - `lint.py` contradiction: `_check_contradiction_with_llm()` checks `provider["is_local"]` — never calls API. Falls back to string comparison if no local LLM or LLM call fails. Results include `llm_verified: true/false`.
+  - `ingest.py`: `_classify_into_communities()` matches node labels against `_concepts.json` by word overlap score. Score > 0 → merge into existing page's `## Ingested Sources` section. Score 0 → new page in `ingested/`. Return dict includes `merged_to_existing` and `new_pages` counts.
+  - `wiki.py`: `update_wiki` docstring updated to document reduced `changed_nodes` behavior. No functional changes needed — already handles empty/reduced lists correctly.
+
+### Step 12 — Document Structure Extraction ✅
+- **Builder**: Bob
+- **Date**: 2026-04-09
+- **Status**: COMPLETE
+- **Files modified**: 3 (extract.py, compile.py, __init__.py)
+- **Verification** (all 3 tests PASS):
+  - Test 1: `extract_document_structure(README.md)` — 12 nodes, 13 edges, 0 tokens — PASS
+  - Test 2: Full pipeline `run()` — 453 nodes, 559 edges (up from ~271 pre-doc-structure) — PASS
+  - Test 3: Empty document — 0 nodes, no crash — PASS
+- **Key decisions**:
+  - `extract_document_structure` added to extract.py: pure-parsing, zero LLM calls
+  - Markdown: `#` headers (depth 1/2/3) as nodes, parent-child via stack → `contains` edges, `[links](url)` → `references` edges (internal only), `` ```lang``` `` → `has_code_example` edges with language nodes, `[[wikilinks]]` → `references` edges
+  - Text/RST: RST underline headers (`===`, `---`) detected. Plain .txt uses uppercase-line-as-section heuristic
+  - PDF: `pdftotext` subprocess with 30s timeout. `shutil.which("pdftotext")` check → silent skip if unavailable
+  - Node ID: `{filestem}_{heading_slug}` (lowercase, special→underscore)
+  - All nodes: `file_type: "document"`, all edges: `confidence: "EXTRACTED"`, `confidence_score: 1.0`
+  - `_merge_extractions` expanded from 2-arg to `*results` (variadic). Node dedup by ID (first wins). Merge order: AST → doc_structure → semantic
+  - compile.py integration: `extract_document_structure(doc_files)` called between `extract_ast` and `extract_semantic`
+
 ## Known Gaps
 
 - Cross-file call/import resolution: imports create edges to `{module}_module` IDs which may or may not exist as nodes; dangling ones are filtered by `build_graph`
 - Broken wikilinks: node-level `[[slug]]` references in community pages point to slugs that don't have dedicated wiki pages (193 in self-compile). Could add per-node pages or switch to anchor links.
-- `update_wiki` is minimal (returns 0) — needs community tracking for true incremental updates
 - Image vision analysis: `.png`/`.jpg`/`.webp` files skipped during ingestion (Known Gap per spec)
 - PDF extraction: requires `pdftotext` CLI tool; if missing, PDF files are skipped (not an error)
 - YouTube URL ingestion: `yt-dlp` subtitle extraction not yet implemented (deferred)

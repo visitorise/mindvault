@@ -2,26 +2,112 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import networkx as nx
+
 from mindvault.detect import detect
-from mindvault.extract import extract_ast, extract_semantic
+from mindvault.extract import extract_ast, extract_document_structure, extract_semantic
 from mindvault.build import build_graph
 from mindvault.cluster import cluster, score_cohesion
 from mindvault.analyze import god_nodes, surprising_connections, suggest_questions
-from mindvault.wiki import generate_wiki, _community_label
+from mindvault.wiki import generate_wiki, update_wiki, _community_label
 from mindvault.export import export_json, export_html
 from mindvault.report import generate_report
 
 
-def _merge_extractions(ast_result: dict, sem_result: dict) -> dict:
-    """Merge AST and semantic extraction results."""
+def _merge_extractions(*results: dict) -> dict:
+    """Merge variable number of extraction results.
+
+    Nodes are deduplicated by ID (first occurrence wins).
+    Merge order determines priority: earlier results take precedence.
+    """
+    seen_ids: set[str] = set()
+    merged_nodes: list[dict] = []
+    merged_edges: list[dict] = []
+    total_input = 0
+    total_output = 0
+
+    for result in results:
+        for node in result.get("nodes", []):
+            nid = node.get("id", "")
+            if nid not in seen_ids:
+                seen_ids.add(nid)
+                merged_nodes.append(node)
+        merged_edges.extend(result.get("edges", []))
+        total_input += result.get("input_tokens", 0)
+        total_output += result.get("output_tokens", 0)
+
     return {
-        "nodes": ast_result.get("nodes", []) + sem_result.get("nodes", []),
-        "edges": ast_result.get("edges", []) + sem_result.get("edges", []),
-        "input_tokens": ast_result.get("input_tokens", 0) + sem_result.get("input_tokens", 0),
-        "output_tokens": ast_result.get("output_tokens", 0) + sem_result.get("output_tokens", 0),
+        "nodes": merged_nodes,
+        "edges": merged_edges,
+        "input_tokens": total_input,
+        "output_tokens": total_output,
     }
+
+
+def _find_changed_nodes(old_graph_path: Path, new_G: nx.DiGraph) -> list[str]:
+    """Compare old graph.json with new graph to find truly changed nodes.
+
+    Change criteria: node added, node deleted, node's edges changed,
+    or node's source_file changed.
+
+    Args:
+        old_graph_path: Path to existing graph.json.
+        new_G: Newly built NetworkX DiGraph.
+
+    Returns:
+        List of changed node IDs. First build returns all nodes.
+    """
+    if not old_graph_path.exists():
+        return list(new_G.nodes())  # First build = all nodes
+
+    try:
+        old_data = json.loads(old_graph_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return list(new_G.nodes())
+
+    old_nodes = {n["id"]: n for n in old_data.get("nodes", [])}
+    old_edges: dict[str, set[str]] = {}
+    for link in old_data.get("links", []):
+        src = link.get("source", "")
+        old_edges.setdefault(src, set()).add(link.get("target", ""))
+
+    changed: list[str] = []
+    new_node_ids = set(new_G.nodes())
+    old_node_ids = set(old_nodes.keys())
+
+    # Added nodes
+    changed.extend(new_node_ids - old_node_ids)
+
+    # Deleted nodes (not in new graph, but neighbors of deleted nodes may be affected)
+    # We don't add deleted nodes themselves (they're gone), but this info
+    # is used by update_wiki to know which communities need refresh.
+    deleted = old_node_ids - new_node_ids
+
+    # Nodes present in both — check for edge or source_file changes
+    for node_id in new_node_ids & old_node_ids:
+        # Edge change
+        new_neighbors = set(new_G.successors(node_id))
+        old_neighbors = old_edges.get(node_id, set())
+        if new_neighbors != old_neighbors:
+            changed.append(node_id)
+            continue
+        # Source file change
+        new_sf = new_G.nodes[node_id].get("source_file", "")
+        old_sf = old_nodes[node_id].get("source_file", "")
+        if new_sf != old_sf:
+            changed.append(node_id)
+
+    # For deleted nodes: find their old neighbors that still exist
+    # (those communities need refreshing too)
+    for del_id in deleted:
+        for neighbor in old_edges.get(del_id, set()):
+            if neighbor in new_node_ids:
+                changed.append(neighbor)
+
+    return list(set(changed))
 
 
 def _generate_labels(G, communities: dict[int, list[str]]) -> dict[int, str]:
@@ -52,10 +138,11 @@ def compile(source_dir: Path, output_dir: Path, incremental: bool = True) -> dic
     code_files = [source_dir / f for f in detection["files"].get("code", [])]
     doc_files = [source_dir / f for f in detection["files"].get("document", [])]
 
-    # 2. Extract AST + Semantic
+    # 2. Extract AST + Document Structure + Semantic
     ast_result = extract_ast(code_files)
+    doc_result = extract_document_structure(doc_files)
     sem_result = extract_semantic(doc_files, output_dir)
-    extraction = _merge_extractions(ast_result, sem_result)
+    extraction = _merge_extractions(ast_result, doc_result, sem_result)
 
     # 3. Build graph
     G = build_graph(extraction)
@@ -72,10 +159,18 @@ def compile(source_dir: Path, output_dir: Path, incremental: bool = True) -> dic
     surprises = surprising_connections(G, communities)
     questions = suggest_questions(G, communities, labels)
 
-    # 7. Generate wiki
-    wiki_pages = generate_wiki(G, communities, labels, output_dir, cohesion=cohesion)
+    # 7. Generate wiki (incremental if wiki already exists)
+    wiki_dir = output_dir / "wiki"
+    concepts_path = wiki_dir / "_concepts.json"
+    graph_path = output_dir / "graph.json"
+    if wiki_dir.exists() and concepts_path.exists():
+        # True incremental: compare old graph.json with new graph
+        changed_nodes = _find_changed_nodes(graph_path, G)
+        wiki_pages = update_wiki(G, changed_nodes, output_dir, cohesion=cohesion)
+    else:
+        wiki_pages = generate_wiki(G, communities, labels, output_dir, cohesion=cohesion)
 
-    # 8. Export JSON
+    # 8. Export JSON (after wiki update so next build can diff against this)
     export_json(G, communities, output_dir / "graph.json")
 
     # 9. Export HTML

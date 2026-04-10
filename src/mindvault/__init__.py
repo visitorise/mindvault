@@ -1,10 +1,10 @@
 """MindVault — unified knowledge management: Search + Graph + Wiki."""
 
-__version__ = "0.1.3"
+__version__ = "0.2.1"
 
 from mindvault.search import search, build_index
 from mindvault.detect import detect
-from mindvault.extract import extract_ast, extract_semantic
+from mindvault.extract import extract_ast, extract_document_structure, extract_semantic
 from mindvault.build import build_graph
 from mindvault.cluster import cluster, score_cohesion
 from mindvault.analyze import god_nodes, surprising_connections
@@ -29,6 +29,7 @@ __all__ = [
     "build_index",
     "detect",
     "extract_ast",
+    "extract_document_structure",
     "extract_semantic",
     "build_graph",
     "cluster",

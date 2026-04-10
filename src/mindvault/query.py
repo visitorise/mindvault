@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 
 from mindvault.search import search as bm25_search
@@ -111,7 +113,131 @@ def _dfs_traverse(graph_data: dict, start_nodes: list[str], depth: int = 4) -> d
     return {"neighbors": neighbors, "edges": edges}
 
 
-def query(question: str, output_dir: Path, mode: str = "bfs", budget: int = 2000) -> dict:
+def _slugify_query(text: str) -> str:
+    """Convert question text to a filesystem-safe slug."""
+    slug = text.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"[\s]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug)
+    return slug.strip("-")[:60]
+
+
+def _save_query_to_wiki(question: str, result: dict, output_dir: Path) -> Path:
+    """Save query result to wiki/queries/ directory."""
+    queries_dir = output_dir / "wiki" / "queries"
+    queries_dir.mkdir(parents=True, exist_ok=True)
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    slug = _slugify_query(question)
+    filename = f"{date_str}-{slug}.md"
+    filepath = queries_dir / filename
+
+    lines = [
+        f"# Q: {question}",
+        f"Date: {date_str}",
+        "",
+        "## Answer Context",
+    ]
+
+    # Search results summary
+    search_results = result.get("search_results", [])
+    if search_results:
+        lines.append("")
+        lines.append("### Search Results")
+        for sr in search_results:
+            lines.append(f"- **{sr.get('title', '')}** (score: {sr.get('score', 0)})")
+            snippet = sr.get("snippet", "")
+            if snippet:
+                lines.append(f"  > {snippet}")
+
+    # Graph context summary
+    gc = result.get("graph_context", {})
+    matched = gc.get("matched_nodes", [])
+    if matched:
+        lines.append("")
+        lines.append("### Graph Context")
+        lines.append(f"Matched nodes: {', '.join(matched[:10])}")
+        neighbors = gc.get("neighbors", [])
+        if neighbors:
+            lines.append(f"Neighbors: {', '.join(neighbors[:10])}")
+
+    # Wiki context excerpt
+    wiki_ctx = result.get("wiki_context", "")
+    if wiki_ctx:
+        lines.append("")
+        lines.append("### Wiki Context")
+        # Truncate to first 500 chars
+        excerpt = wiki_ctx[:500]
+        if len(wiki_ctx) > 500:
+            excerpt += "..."
+        lines.append(excerpt)
+
+    # Sources
+    lines.append("")
+    lines.append("## Sources")
+    for sr in search_results:
+        path = sr.get("path", "")
+        title = sr.get("title", path)
+        lines.append(f"- [[{path}]] -- {title}")
+
+    filepath.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Update _concepts.json with query keywords
+    concepts_path = output_dir / "wiki" / "_concepts.json"
+    concepts: dict[str, list[str]] = {}
+    if concepts_path.exists():
+        try:
+            concepts = json.loads(concepts_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            concepts = {}
+
+    # Add query keywords to concepts index
+    query_page = f"queries/{filename}"
+    for token in question.lower().split():
+        token = re.sub(r"[^a-z0-9가-힣]", "", token)
+        if len(token) > 2:
+            if token not in concepts:
+                concepts[token] = []
+            if query_page not in concepts[token]:
+                concepts[token].append(query_page)
+
+    concepts_path.write_text(json.dumps(concepts, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Update search index to include the saved query
+    _update_search_index_for_query(filepath, output_dir)
+
+    return filepath
+
+
+def _update_search_index_for_query(query_file: Path, output_dir: Path) -> None:
+    """Add saved query file to search index."""
+    index_path = output_dir / "search_index.json"
+    if not index_path.exists():
+        return
+
+    from mindvault.index import load_index, _tokenize, _extract_title, _extract_headings, _hash_content, _compute_idf
+
+    index_data = load_index(index_path)
+    docs = index_data.get("docs", {})
+
+    content = query_file.read_text(encoding="utf-8")
+    wiki_dir = output_dir / "wiki"
+    rel_path = str(query_file.relative_to(wiki_dir))
+
+    docs[rel_path] = {
+        "title": _extract_title(content) or query_file.stem,
+        "headings": _extract_headings(content),
+        "tokens": _tokenize(content),
+        "hash": _hash_content(content),
+    }
+
+    index_data["docs"] = docs
+    index_data["doc_count"] = len(docs)
+    index_data["idf"] = _compute_idf(docs)
+    index_path.write_text(json.dumps(index_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def query(question: str, output_dir: Path, mode: str = "bfs", budget: int = 2000, save: bool = False) -> dict:
     """3-layer query: search -> graph -> wiki -> answer context.
 
     Args:
@@ -230,9 +356,15 @@ def query(question: str, output_dir: Path, mode: str = "bfs", budget: int = 2000
         total_text += str(edge)
     tokens_used = len(total_text) // 4
 
-    return {
+    result = {
         "search_results": search_results,
         "graph_context": graph_context,
         "wiki_context": wiki_context,
         "tokens_used": tokens_used,
     }
+
+    if save:
+        saved_path = _save_query_to_wiki(question, result, output_dir)
+        result["saved_to"] = str(saved_path)
+
+    return result

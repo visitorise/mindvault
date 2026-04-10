@@ -378,6 +378,263 @@ def extract_ast(code_files: list[Path]) -> dict:
     }
 
 
+def extract_document_structure(doc_files: list[Path]) -> dict:
+    """Extract structure from document files (no LLM, 0 tokens).
+
+    Supports: .md (headers, links, code blocks, wikilinks),
+              .txt/.rst (section detection, RST underline headers),
+              .pdf (pdftotext, silent skip if unavailable).
+
+    Returns: {nodes: [], edges: [], input_tokens: 0, output_tokens: 0}
+    """
+    all_nodes: list[dict] = []
+    all_edges: list[dict] = []
+    seen_ids: set[str] = set()
+
+    def _add_node(node: dict) -> None:
+        if node["id"] not in seen_ids:
+            seen_ids.add(node["id"])
+            all_nodes.append(node)
+
+    def _add_edge(edge: dict) -> None:
+        all_edges.append(edge)
+
+    def _heading_slug(text: str) -> str:
+        return re.sub(r"[^a-z0-9_]", "_", text.strip().lower()).strip("_")
+
+    for file_path in doc_files:
+        if not file_path.exists():
+            continue
+        ext = file_path.suffix.lower()
+        source_file = str(file_path)
+        filestem = _sanitize_id(file_path.stem)
+
+        try:
+            if ext == ".md":
+                _parse_markdown(file_path, filestem, source_file, _add_node, _add_edge, _heading_slug)
+            elif ext in (".txt", ".rst"):
+                _parse_text(file_path, filestem, source_file, _add_node, _add_edge, _heading_slug, is_rst=(ext == ".rst"))
+            elif ext == ".pdf":
+                _parse_pdf(file_path, filestem, source_file, _add_node, _add_edge, _heading_slug)
+        except Exception:
+            continue
+
+    return {
+        "nodes": all_nodes,
+        "edges": all_edges,
+        "input_tokens": 0,
+        "output_tokens": 0,
+    }
+
+
+def _parse_markdown(
+    file_path: Path, filestem: str, source_file: str,
+    add_node, add_edge, heading_slug,
+) -> None:
+    """Parse markdown file for headers, links, code blocks, wikilinks."""
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="ignore")
+    except (OSError, IOError):
+        return
+
+    lines = text.split("\n")
+    # Stack of (depth, node_id) for parent-child tracking
+    header_stack: list[tuple[int, str]] = []
+    in_code_block = False
+    code_lang = None
+    current_header_id = None
+
+    for i, line in enumerate(lines):
+        # Code block toggle
+        if line.strip().startswith("```"):
+            if not in_code_block:
+                in_code_block = True
+                lang_match = re.match(r"```(\w+)", line.strip())
+                code_lang = lang_match.group(1) if lang_match else None
+                # Create has_code_example edge from current header
+                if current_header_id and code_lang:
+                    lang_node_id = f"{filestem}_{_sanitize_id(code_lang)}_lang"
+                    add_node({
+                        "id": lang_node_id,
+                        "label": code_lang,
+                        "file_type": "document",
+                        "source_file": source_file,
+                        "source_location": f"line {i + 1}",
+                    })
+                    add_edge({
+                        "source": current_header_id,
+                        "target": lang_node_id,
+                        "relation": "has_code_example",
+                        "confidence": "EXTRACTED",
+                        "confidence_score": 1.0,
+                        "source_file": source_file,
+                    })
+            else:
+                in_code_block = False
+                code_lang = None
+            continue
+
+        if in_code_block:
+            continue
+
+        # Header detection
+        header_match = re.match(r"^(#{1,3})\s+(.+)", line)
+        if header_match:
+            depth = len(header_match.group(1))
+            title = header_match.group(2).strip()
+            slug = heading_slug(title)
+            if not slug:
+                continue
+            node_id = f"{filestem}_{slug}"
+            current_header_id = node_id
+
+            add_node({
+                "id": node_id,
+                "label": title,
+                "file_type": "document",
+                "source_file": source_file,
+                "source_location": f"line {i + 1}",
+            })
+
+            # Find parent: pop stack until we find a shallower depth
+            while header_stack and header_stack[-1][0] >= depth:
+                header_stack.pop()
+            if header_stack:
+                parent_id = header_stack[-1][1]
+                add_edge({
+                    "source": parent_id,
+                    "target": node_id,
+                    "relation": "contains",
+                    "confidence": "EXTRACTED",
+                    "confidence_score": 1.0,
+                    "source_file": source_file,
+                })
+            header_stack.append((depth, node_id))
+            continue
+
+        # Markdown links [text](url)
+        for m in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", line):
+            url = m.group(2)
+            # Only internal references (relative paths, no http)
+            if not url.startswith("http") and not url.startswith("#"):
+                target_stem = _sanitize_id(Path(url.split("#")[0]).stem)
+                if target_stem and current_header_id:
+                    target_id = f"{target_stem}_module"
+                    add_edge({
+                        "source": current_header_id,
+                        "target": target_id,
+                        "relation": "references",
+                        "confidence": "EXTRACTED",
+                        "confidence_score": 1.0,
+                        "source_file": source_file,
+                    })
+
+        # Wikilinks [[target]]
+        for m in re.finditer(r"\[\[([^\]]+)\]\]", line):
+            target_text = m.group(1)
+            target_id = f"{_sanitize_id(target_text)}_module"
+            if current_header_id:
+                add_edge({
+                    "source": current_header_id,
+                    "target": target_id,
+                    "relation": "references",
+                    "confidence": "EXTRACTED",
+                    "confidence_score": 1.0,
+                    "source_file": source_file,
+                })
+
+
+def _parse_text(
+    file_path: Path, filestem: str, source_file: str,
+    add_node, add_edge, heading_slug, is_rst: bool = False,
+) -> None:
+    """Parse text/rst file for sections."""
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="ignore")
+    except (OSError, IOError):
+        return
+
+    lines = text.split("\n")
+    prev_line = None
+
+    for i, line in enumerate(lines):
+        is_header = False
+        title = None
+
+        if is_rst and prev_line and prev_line.strip():
+            # RST underline headers: line of === or --- under text
+            stripped = line.strip()
+            if stripped and len(stripped) >= 3 and all(c == stripped[0] for c in stripped) and stripped[0] in "=-~^\"'`:._*+#":
+                title = prev_line.strip()
+                is_header = True
+
+        # Uppercase line as section title (for plain .txt)
+        if not is_header and not is_rst:
+            stripped = line.strip()
+            if stripped and stripped == stripped.upper() and len(stripped) > 3 and stripped[0].isalpha():
+                # Check if surrounded by blank lines
+                prev_blank = (i == 0) or (not lines[i - 1].strip())
+                next_blank = (i == len(lines) - 1) or (not lines[i + 1].strip() if i + 1 < len(lines) else True)
+                if prev_blank or next_blank:
+                    title = stripped
+                    is_header = True
+
+        if is_header and title:
+            slug = heading_slug(title)
+            if slug:
+                node_id = f"{filestem}_{slug}"
+                add_node({
+                    "id": node_id,
+                    "label": title,
+                    "file_type": "document",
+                    "source_file": source_file,
+                    "source_location": f"line {i + 1}",
+                })
+
+        prev_line = line
+
+
+def _parse_pdf(
+    file_path: Path, filestem: str, source_file: str,
+    add_node, add_edge, heading_slug,
+) -> None:
+    """Parse PDF via pdftotext subprocess. Silent skip if unavailable."""
+    import subprocess
+    import shutil
+
+    if not shutil.which("pdftotext"):
+        return  # Silent skip
+
+    try:
+        result = subprocess.run(
+            ["pdftotext", str(file_path), "-"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            return
+        text = result.stdout
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        return
+
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Heuristic: lines that start with uppercase/number and are short = section headers
+        if len(stripped) < 80 and stripped[0].isupper() and not stripped.endswith("."):
+            slug = heading_slug(stripped)
+            if slug and len(slug) > 2:
+                node_id = f"{filestem}_{slug}"
+                add_node({
+                    "id": node_id,
+                    "label": stripped,
+                    "file_type": "document",
+                    "source_file": source_file,
+                    "source_location": f"line {i + 1}",
+                })
+
+
 def extract_semantic(files: list[Path], cache_dir: Path) -> dict:
     """Semantic extraction (requires LLM). Uses SHA256 cache.
 

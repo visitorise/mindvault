@@ -1,74 +1,53 @@
-# REVIEW-REQUEST — Step 9: Semantic Extraction (LLM Auto-Detect + Consent)
+# REVIEW-REQUEST — Step 12: Document Structure Extraction
 
 **Builder**: Bob
 **Date**: 2026-04-09
-**Step**: 9 — Semantic Extraction (LLM Auto-Detect + Consent)
+**Step**: 12 — Document Structure Extraction (Markdown/Text/RST/PDF parsing, zero LLM)
 
-## Files Created/Modified
+## Files Modified (3)
 
-### New files (3)
-1. **`src/mindvault/config.py`** — User settings in `~/.mindvault/config.json`
-   - `load_config()`, `save_config()`, `get()`, `set()`
-   - Keys: `llm_endpoint`, `auto_approve_api`, `max_tokens_per_file`, `preferred_provider`
-   - Merges user values with defaults on load
+1. **`src/mindvault/extract.py`** — Added `extract_document_structure` + 3 parser functions:
+   - `extract_document_structure(doc_files)` — main entry point, dispatches by extension
+   - `_parse_markdown` — parses `#` headers (depth 1-3) into nodes with parent-child `contains` edges via stack, `[link](url)` → `references` edges (internal only, skips http/anchors), `` ```lang``` `` → `has_code_example` edges with language nodes, `[[wikilink]]` → `references` edges
+   - `_parse_text` — RST underline headers (`===`, `---`, etc.) and plain .txt uppercase-line sections
+   - `_parse_pdf` — `pdftotext` subprocess with `shutil.which` guard + 30s timeout, silent skip on failure
+   - All nodes: `file_type: "document"`, `source_location: "line N"`
+   - All edges: `confidence: "EXTRACTED"`, `confidence_score: 1.0`
+   - Node ID: `{filestem}_{heading_slug}` via `_sanitize_id`
+   - Internal dedup via `seen_ids` set (first node wins)
 
-2. **`src/mindvault/llm.py`** — LLM auto-detection + calling (urllib only)
-   - `detect_llm()`: priority — config override → Gemma:8080 → Ollama:11434 → ANTHROPIC_API_KEY → OPENAI_API_KEY
-   - `_detect_gemma_model()`: queries `/v1/models` to discover actual model ID (handles MLX server naming like `mlx-community/gemma-4-e4b-it-4bit`)
-   - `call_llm()`: OpenAI-compatible for local, Anthropic Messages API for Claude, OpenAI API for GPT
-   - `estimate_cost()`: token estimate (len/4) * price per model
-   - `confirm_api_usage()`: prints warning + input() for non-auto-approve, returns False if not interactive
+2. **`src/mindvault/compile.py`** — Integration + merge expansion:
+   - `_merge_extractions` changed from `(ast_result, sem_result)` to `(*results)` variadic
+   - Node deduplication by ID in merge (first occurrence wins across all results)
+   - Merge order: AST → doc_structure → semantic (AST nodes take priority)
+   - `compile()` now calls 3 extractors: `extract_ast` → `extract_document_structure` → `extract_semantic`
 
-3. **`src/mindvault/ingest.py`** — External source ingestion
-   - `ingest()`: entry point, detects file vs URL vs directory
-   - `ingest_file()`: copy to sources/, extract text, call LLM for concept extraction
-   - `ingest_url()`: fetch URL, strip HTML, save as .md, then ingest_file
-   - Text extraction: .md/.txt/.rst direct, .pdf via pdftotext (skip if unavailable), images skip
+3. **`src/mindvault/__init__.py`** — Export `extract_document_structure`
 
-### Modified files (4)
-4. **`src/mindvault/extract.py`** — `extract_semantic()` fully implemented:
-   - detect_llm → if none, return empty
-   - API consent check (batch, once) → if denied, return empty
-   - Per-file: cache check → read text → call_llm → parse JSON → cache update
-   - JSON parse failure → warning to stderr, skip file, continue
-
-5. **`src/mindvault/compile.py`** — Calls both `extract_ast` AND `extract_semantic`, merges via `_merge_extractions()`
-
-6. **`src/mindvault/cli.py`** — Added `config` subcommand (llm, auto-approve, provider, show). Updated `cmd_ingest` to handle URLs and document files directly.
-
-7. **`src/mindvault/__init__.py`** — Added re-exports for config, llm, and ingest modules.
-
-## Test Results (all 6 PASS)
+## Test Results (all 3 PASS)
 
 | # | Test | Result | Detail |
 |---|------|--------|--------|
-| 1 | `detect_llm()` | PASS | Gemma at localhost:8080, model `mlx-community/gemma-4-e4b-it-4bit` |
-| 2 | `call_llm()` local | PASS | Gemma returns JSON with 3 extracted concepts |
-| 3 | `ingest(README.md)` | PASS | 13 nodes, 14 edges extracted |
-| 4 | `extract_semantic()` | PASS | 10 nodes, 10 edges from doc files |
-| 5 | Config save/load | PASS | Persists to `~/.mindvault/config.json` |
-| 6 | Full pipeline | PASS | 271 nodes, 373 edges, 40 wiki pages, 52 index docs |
+| 1 | Markdown structure extraction | PASS | README.md → 12 nodes, 13 edges, 0 input_tokens, 0 output_tokens |
+| 2 | Full pipeline integration | PASS | 453 nodes, 559 edges (was ~271 without doc structure — 67% increase) |
+| 3 | Empty document | PASS | 0 nodes, no errors |
 
 ## Review Focus Areas
 
-1. **Gemma model auto-discovery**: `_detect_gemma_model()` queries `/v1/models` and picks the first model with "gemma" in its ID. If the MLX server hosts multiple models, it prefers gemma but falls back to the first listed model. This is correct for the current setup but may need refinement if the server loads non-gemma models.
+1. **Markdown parser code-block tracking**: `in_code_block` toggle prevents false header detection inside fenced code blocks. The toggle tracks `` ``` `` lines. Edge case: nested code blocks (rare) would cause toggle confusion — acceptable tradeoff.
 
-2. **LLM response parsing**: Gemma 4 returns a `reasoning` field alongside `content` in its chat completions response. The code correctly accesses only `message["content"]`. JSON code blocks (```json...```) are stripped before parsing.
+2. **Variadic `_merge_extractions`**: The old 2-arg version simply concatenated nodes. The new version deduplicates by node ID (first wins). This is a behavior change — previously if AST and semantic both produced a node with the same ID, both would appear. Now only the first survives. This matches the brief spec ("first wins") and prevents graph bloat.
 
-3. **Semantic extraction caching**: Uses the same SHA256 cache as AST extraction. Files already cached from `ingest()` won't be re-processed by `extract_semantic()` (and vice versa). This is intentional — prevents duplicate LLM calls.
+3. **PDF silent skip**: Two levels of safety — `shutil.which("pdftotext")` returns `None` if binary not installed (returns immediately), and `subprocess.run` has a 30s timeout. Both paths return without error.
 
-4. **API cost consent**: Only prompted once per `extract_semantic()` batch (not per-file). Local LLM gets no prompt. The `confirm_api_usage()` returns False in non-interactive contexts unless `auto_approve_api` is set.
-
-5. **max_tokens**: `max_tokens: 4000` is sent to local models to prevent truncation. Without this, the Gemma MLX server defaults to a lower limit and returns `finish_reason: length`.
+4. **RST header detection**: Uses "previous line is text + current line is all same char (from `=-~^` etc.)" heuristic. This matches the RST spec but doesn't distinguish header levels (all are flat nodes). Acceptable since RST files are rare in most codebases.
 
 ## Acceptance Criteria Check
 
 | # | Criterion | Status |
 |---|-----------|--------|
-| 1 | `detect_llm()` → Gemma detected on this machine | YES |
-| 2 | `call_llm()` → local LLM response received | YES |
-| 3 | `ingest(README.md)` → concepts extracted | YES |
-| 4 | `extract_semantic()` → nodes + edges returned | YES |
-| 5 | Config save/load works | YES |
-| 6 | Full pipeline includes semantic extraction | YES |
-| 7 | All 6 tests PASS | YES |
+| 1 | README.md: 5+ section nodes extracted | YES (12 nodes) |
+| 2 | Token usage: 0 | YES (input_tokens=0, output_tokens=0) |
+| 3 | Pipeline integration: total nodes increased | YES (271 → 453, +67%) |
+| 4 | Empty document: no crash | YES (0 nodes returned) |
+| 5 | All 3 tests PASS | YES |

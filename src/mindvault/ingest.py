@@ -150,6 +150,217 @@ def _parse_llm_json(response: str, source_file: str) -> dict:
         return {"nodes": [], "edges": []}
 
 
+def _classify_into_communities(nodes: list[dict], concepts_path: Path, wiki_dir: Path) -> dict:
+    """Classify extracted nodes into existing communities or new pages.
+
+    Matches ingested node labels against existing _concepts.json entries.
+    If match found, the node merges into the existing wiki page.
+    If no match, the node goes to wiki/ingested/ as a new page.
+
+    Args:
+        nodes: List of extracted node dicts with 'label' key.
+        concepts_path: Path to _concepts.json.
+        wiki_dir: Wiki directory path.
+
+    Returns:
+        Dict with 'merged' (list of {node, target, concept}) and 'new' (list of nodes).
+    """
+    concepts: dict[str, list[str]] = {}
+    if concepts_path.exists():
+        try:
+            concepts = json.loads(concepts_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            concepts = {}
+
+    classified: dict[str, list] = {"merged": [], "new": []}
+
+    for node in nodes:
+        label = node.get("label", "").lower()
+        if not label:
+            classified["new"].append(node)
+            continue
+
+        # Find best matching concept by word overlap
+        best_match = None
+        best_score = 0
+        label_words = set(label.split())
+        for concept, pages in concepts.items():
+            concept_words = set(concept.split())
+            overlap = len(label_words & concept_words)
+            if overlap > best_score:
+                best_score = overlap
+                best_match = (concept, pages)
+
+        if best_match and best_score > 0:
+            target_page = best_match[1][0]  # First related page
+            classified["merged"].append({
+                "node": node,
+                "target": target_page,
+                "concept": best_match[0],
+            })
+        else:
+            classified["new"].append(node)
+
+    return classified
+
+
+def _update_wiki_from_extraction(extraction: dict, file_path: Path, output_dir: Path) -> dict:
+    """Update wiki pages based on LLM extraction results.
+
+    Returns:
+        Dict with 'merged_to_existing' and 'new_pages' counts.
+    """
+    nodes = extraction.get("nodes", [])
+    if not nodes:
+        return {"merged_to_existing": 0, "new_pages": 0}
+
+    wiki_dir = output_dir / "wiki"
+    ingested_dir = wiki_dir / "ingested"
+    ingested_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load existing concepts index
+    concepts_path = wiki_dir / "_concepts.json"
+    concepts: dict[str, list[str]] = {}
+    if concepts_path.exists():
+        try:
+            concepts = json.loads(concepts_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            concepts = {}
+
+    source_name = Path(file_path).stem
+
+    # Classify nodes into existing communities or new pages
+    classified = _classify_into_communities(nodes, concepts_path, wiki_dir)
+    merged_count = 0
+    new_count = 0
+
+    # Process merged nodes — append to existing wiki pages
+    for entry in classified["merged"]:
+        node = entry["node"]
+        target_page = entry["target"]
+        page_path = wiki_dir / target_page
+        if not page_path.exists():
+            # Target page gone — treat as new
+            classified["new"].append(node)
+            continue
+        content = page_path.read_text(encoding="utf-8")
+        source_line = f"- {source_name} ({file_path})"
+        if source_line in content:
+            merged_count += 1
+            continue  # already there
+        if "## Ingested Sources" in content:
+            content = content.replace(
+                "## Ingested Sources",
+                f"## Ingested Sources\n{source_line}",
+            )
+        else:
+            marker = "<!-- user-notes -->"
+            if marker in content:
+                content = content.replace(
+                    marker,
+                    f"\n## Ingested Sources\n{source_line}\n\n{marker}",
+                )
+            else:
+                content += f"\n## Ingested Sources\n{source_line}\n"
+        page_path.write_text(content, encoding="utf-8")
+        merged_count += 1
+
+    # Process new nodes — create pages in ingested/
+    for node in classified["new"]:
+        label = node.get("label", node.get("id", "unknown"))
+        concept_key = label.lower()
+        node_id = node.get("id", label)
+
+        slug = re.sub(r"[^a-z0-9\s-]", "", label.lower().strip())
+        slug = re.sub(r"[\s]+", "-", slug)
+        slug = re.sub(r"-+", "-", slug).strip("-")
+        if not slug:
+            slug = node_id
+
+        page_path = ingested_dir / f"{slug}.md"
+        page_content = [
+            f"# {label}",
+            f"Source: {file_path}",
+            "",
+            "## Ingested Sources",
+            f"- {source_name} ({file_path})",
+            "",
+        ]
+
+        # Add edges info if available
+        edges = extraction.get("edges", [])
+        related = [e for e in edges if e.get("source") == node_id or e.get("target") == node_id]
+        if related:
+            page_content.append("## Relationships")
+            for edge in related:
+                src = edge.get("source", "")
+                tgt = edge.get("target", "")
+                rel = edge.get("relation", "related")
+                if src == node_id:
+                    page_content.append(f"- -> {rel} -> {tgt}")
+                else:
+                    page_content.append(f"- <- {rel} <- {src}")
+
+        page_path.write_text("\n".join(page_content) + "\n", encoding="utf-8")
+
+        # Register in concepts
+        rel_page = f"ingested/{slug}.md"
+        if concept_key not in concepts:
+            concepts[concept_key] = []
+        if rel_page not in concepts[concept_key]:
+            concepts[concept_key].append(rel_page)
+        new_count += 1
+
+    # Write updated concepts index
+    concepts_path.parent.mkdir(parents=True, exist_ok=True)
+    concepts_path.write_text(json.dumps(concepts, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Create ingested/INDEX.md
+    ingested_pages = sorted(ingested_dir.glob("*.md"))
+    index_lines = ["# Ingested Sources", ""]
+    for p in ingested_pages:
+        if p.name == "INDEX.md":
+            continue
+        index_lines.append(f"- [[{p.stem}]]")
+    (ingested_dir / "INDEX.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
+
+    # Update search index
+    _update_search_index_for_ingested(wiki_dir, output_dir)
+
+    return {"merged_to_existing": merged_count, "new_pages": new_count}
+
+
+def _update_search_index_for_ingested(wiki_dir: Path, output_dir: Path) -> None:
+    """Update search index with ingested wiki pages."""
+    index_path = output_dir / "search_index.json"
+    if not index_path.exists():
+        return
+
+    from mindvault.index import load_index, _tokenize, _extract_title, _extract_headings, _hash_content, _compute_idf
+
+    index_data = load_index(index_path)
+    docs = index_data.get("docs", {})
+
+    ingested_dir = wiki_dir / "ingested"
+    if not ingested_dir.exists():
+        return
+
+    for md_file in ingested_dir.glob("*.md"):
+        content = md_file.read_text(encoding="utf-8")
+        rel_path = str(md_file.relative_to(wiki_dir))
+        docs[rel_path] = {
+            "title": _extract_title(content) or md_file.stem,
+            "headings": _extract_headings(content),
+            "tokens": _tokenize(content),
+            "hash": _hash_content(content),
+        }
+
+    index_data["docs"] = docs
+    index_data["doc_count"] = len(docs)
+    index_data["idf"] = _compute_idf(docs)
+    index_path.write_text(json.dumps(index_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def ingest_file(file_path: Path, output_dir: Path) -> dict:
     """Ingest a single file: copy to sources/, extract text, LLM extract, merge.
 
@@ -176,7 +387,17 @@ def ingest_file(file_path: Path, output_dir: Path) -> dict:
     # Detect LLM
     provider = detect_llm()
     if provider["provider"] is None:
-        return {"skipped": True, "source": str(file_path), "reason": "no LLM available"}
+        # No LLM available — still create wiki page from file metadata
+        wiki_result = _update_wiki_from_extraction(
+            {"nodes": [{"id": file_path.stem, "label": file_path.stem, "source_file": str(file_path)}], "edges": []},
+            file_path, output_dir,
+        )
+        return {
+            "nodes": 1, "edges": 0, "source": str(file_path),
+            "reason": "no LLM, metadata only",
+            "merged_to_existing": wiki_result.get("merged_to_existing", 0),
+            "new_pages": wiki_result.get("new_pages", 0),
+        }
 
     # Consent for API
     if not provider["is_local"]:
@@ -187,11 +408,16 @@ def ingest_file(file_path: Path, output_dir: Path) -> dict:
     # LLM extraction
     result = _llm_extract(text, str(file_path), provider)
 
+    # Update wiki with extracted concepts
+    wiki_result = _update_wiki_from_extraction(result, file_path, output_dir)
+
     return {
         "nodes": len(result["nodes"]),
         "edges": len(result["edges"]),
         "source": str(file_path),
         "extraction": result,
+        "merged_to_existing": wiki_result.get("merged_to_existing", 0),
+        "new_pages": wiki_result.get("new_pages", 0),
     }
 
 
