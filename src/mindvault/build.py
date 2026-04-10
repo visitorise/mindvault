@@ -28,9 +28,11 @@ def build_graph(extraction: dict) -> nx.DiGraph:
     for edge in extraction.get("edges", []):
         src = edge["source"]
         tgt = edge["target"]
-        # Skip dangling edges
-        if src not in seen_nodes or tgt not in seen_nodes:
-            continue
+        # Create placeholder nodes for dangling references instead of dropping edges
+        for nid in (src, tgt):
+            if nid not in seen_nodes:
+                seen_nodes.add(nid)
+                G.add_node(nid, label=nid, file_type="placeholder", source_file="", source_location=None)
         attrs = {k: v for k, v in edge.items() if k not in ("source", "target")}
         G.add_edge(src, tgt, **attrs)
 

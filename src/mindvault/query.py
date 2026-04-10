@@ -283,6 +283,18 @@ def query(question: str, output_dir: Path, mode: str = "bfs", budget: int = 2000
         if matched_nodes:
             if mode == "dfs":
                 traversal = _dfs_traverse(graph_data, matched_nodes, depth=4)
+            elif mode == "hybrid":
+                bfs_result = _bfs_traverse(graph_data, matched_nodes, depth=2)
+                dfs_result = _dfs_traverse(graph_data, matched_nodes, depth=4)
+                seen = set(bfs_result["neighbors"])
+                merged_neighbors = list(bfs_result["neighbors"])
+                merged_edges = list(bfs_result["edges"])
+                for n, e in zip(dfs_result["neighbors"], dfs_result["edges"]):
+                    if n not in seen:
+                        seen.add(n)
+                        merged_neighbors.append(n)
+                        merged_edges.append(e)
+                traversal = {"neighbors": merged_neighbors, "edges": merged_edges}
             else:
                 traversal = _bfs_traverse(graph_data, matched_nodes, depth=2)
 

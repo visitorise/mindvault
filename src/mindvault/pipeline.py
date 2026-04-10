@@ -110,27 +110,40 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
     # Detect files
     detection = detect(source_dir)
     code_files = [source_dir / f for f in detection["files"].get("code", [])]
+    doc_files = [source_dir / f for f in detection["files"].get("document", [])]
 
-    # Check which files changed
-    dirty_files = get_dirty_files(code_files, output_dir)
+    # Check which files changed (code + documents)
+    dirty_code = get_dirty_files(code_files, output_dir)
+    dirty_docs = get_dirty_files(doc_files, output_dir)
+    dirty_files = dirty_code + dirty_docs
 
     if not dirty_files:
         return {"changed": 0}
 
-    # Extract AST for dirty files only
-    extraction = extract_ast(dirty_files)
+    # Extract AST for dirty code files, document structure for dirty doc files
+    from mindvault.extract import extract_document_structure
+    code_extraction = extract_ast(dirty_code) if dirty_code else {"nodes": [], "edges": []}
+    doc_extraction = extract_document_structure(dirty_docs) if dirty_docs else {"nodes": [], "edges": []}
+    extraction = {
+        "nodes": code_extraction["nodes"] + doc_extraction["nodes"],
+        "edges": code_extraction["edges"] + doc_extraction["edges"],
+    }
 
     # Load existing graph data
     existing_data = json.loads(graph_path.read_text(encoding="utf-8"))
     existing_nodes = {n["id"]: n for n in existing_data.get("nodes", [])}
     existing_links = existing_data.get("links", [])
 
-    # Merge: add new nodes, update existing
+    # Remove stale nodes from dirty files, then add new/updated ones
+    dirty_sources = {str(f) for f in dirty_files}
+    existing_nodes = {
+        nid: n for nid, n in existing_nodes.items()
+        if n.get("source_file") not in dirty_sources
+    }
     for node in extraction["nodes"]:
         existing_nodes[node["id"]] = node
 
-    # For edges, collect source files of dirty files and remove old edges from those files
-    dirty_sources = {str(f) for f in dirty_files}
+    # For edges, remove old edges from dirty files
     kept_links = [
         link for link in existing_links
         if link.get("source_file") not in dirty_sources
