@@ -52,29 +52,33 @@ AI_TOOLS = [
 
 CLAUDE_MD_SECTION = """\
 
-## MindVault
+## MindVault — MANDATORY
 
-MindVault knowledge base is available. Before answering codebase questions:
+**ALWAYS run `mindvault query "<question>" --global` BEFORE answering any codebase question.**
+This is not optional. The knowledge graph contains project context, relationships, and decisions
+that you cannot derive from reading files alone.
 
-1. Run `mindvault query "<question>"` to get context from the knowledge graph
-2. Use the search results, graph context, and wiki context in your answer
-3. If mindvault-out/ doesn't exist, run `mindvault ingest .` first
-
-For global cross-project queries, use `mindvault query "<question>" --global`
+1. Run `mindvault query "<question>" --global` first
+2. Read the Search Results, Graph Context, and Wiki Context in the output
+3. Use this context to inform your answer — do NOT ignore it
+4. If `mindvault-out/` doesn't exist, run `mindvault ingest .` first
+5. Only fall back to reading raw files if MindVault returns no results
 """
 
 GENERIC_RULES = """\
 
-# MindVault Knowledge Base
+# MindVault Knowledge Base — MANDATORY
 
-This project has a MindVault knowledge base. Before answering codebase questions,
-run `mindvault query "<question>"` in the terminal to get context from the
-knowledge graph, wiki, and search index. Use the output to inform your answer.
+ALWAYS run `mindvault query "<question>"` in the terminal BEFORE answering
+any codebase question. This is not optional. The knowledge graph contains
+project context, relationships, and architectural decisions.
 
-If the `mindvault-out/` directory doesn't exist, run `mindvault ingest .` first
-to build the knowledge base.
-
-For cross-project queries: `mindvault query "<question>" --global`
+Steps:
+1. Run `mindvault query "<question>"` (or `--global` for cross-project)
+2. Read the 3-layer output (Search + Graph + Wiki)
+3. Use the context in your answer
+4. If `mindvault-out/` doesn't exist, run `mindvault ingest .` first
+5. Only read raw files if MindVault returns no results
 """
 
 
