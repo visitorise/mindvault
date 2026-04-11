@@ -340,6 +340,62 @@ It automatically generates configuration files matching the detected tool upon r
 
 ---
 
+## Using with Obsidian
+
+MindVault is **Obsidian-ready out of the box**. No plugin, no configuration — MindVault already reads and writes Obsidian's wikilink syntax (`[[page]]`) natively. Three usage patterns are immediately available.
+
+### Pattern A: Open MindVault output as an Obsidian vault
+
+Index your codebase first:
+
+```bash
+mindvault ingest .
+```
+
+This creates per-community markdown wiki pages under `mindvault-out/wiki/`. **Open that folder as an Obsidian vault** and everything just works:
+
+- ✅ Obsidian's graph view visualizes the MindVault knowledge graph
+- ✅ `[[link]]` bidirectional navigation
+- ✅ Search / tags / backlinks / outline panels all apply
+
+You get Andrej Karpathy's LLM Wiki pattern **auto-generated and served through Obsidian's UI**, with zero manual wiki maintenance.
+
+### Pattern B: Index an existing Obsidian vault
+
+If you already have an Obsidian vault, point MindVault at it:
+
+```bash
+mindvault ingest ~/my-obsidian-vault
+```
+
+MindVault automatically handles:
+
+- `.md` headers → graph nodes
+- `[[wikilinks]]` → graph edges (your vault's existing link structure is preserved)
+- BM25 search index built over the whole vault
+
+Then run 3-layer queries directly against your existing notes:
+
+```bash
+mindvault query "key decisions for Project R"
+```
+
+### Pattern C: Unified code + notes search
+
+Index both a code project (Pattern A) and an Obsidian vault (Pattern B) — they merge into one knowledge graph:
+
+```bash
+mindvault global ~/projects           # all your code
+mindvault ingest ~/my-obsidian-vault  # your notes
+mindvault query "rationale behind the auth module" --global
+```
+
+→ Code structure (Graph Layer) plus the design decisions from your Obsidian notes (Wiki Layer) flow into a single answer.
+
+> **Tip**: Use Obsidian's "Folder as vault" feature to open `mindvault-out/wiki/` directly — no copying or symlinks needed.
+
+---
+
 ## LLM Configuration
 
 MindVault utilizes an LLM for semantic extraction (analyzing code intent/purpose). **AST-based structural analysis functions correctly even without an LLM.**
@@ -610,5 +666,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.2.9 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.2.10 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

@@ -338,6 +338,62 @@ tree-sitter 기반 AST 추출을 지원하는 13개 언어:
 
 ---
 
+## Obsidian과 함께 쓰기
+
+MindVault는 **Obsidian과 즉시 호환**됩니다. 별도 플러그인이나 설정 없이 작동합니다 — MindVault가 Obsidian의 wikilink 문법(`[[page]]`)을 네이티브로 읽고 쓰기 때문입니다. 세 가지 사용 패턴이 있습니다.
+
+### 패턴 A: MindVault 출력물을 Obsidian vault로 열기
+
+코드베이스를 먼저 인덱싱합니다:
+
+```bash
+mindvault ingest .
+```
+
+그러면 `mindvault-out/wiki/` 폴더에 커뮤니티별 마크다운 위키 페이지가 생성됩니다. 이 폴더를 **Obsidian에서 vault로 열면** 다음이 자동으로 작동합니다:
+
+- ✅ Obsidian 그래프 뷰에 MindVault 지식 그래프 시각화
+- ✅ `[[링크]]` 양방향 네비게이션
+- ✅ 검색 / 태그 / 백링크 / 아웃라인 패널 전부 활용
+
+Andrej Karpathy의 LLM Wiki 패턴을 **자동 생성 + Obsidian UI**로 즉시 사용하는 효과입니다.
+
+### 패턴 B: 기존 Obsidian vault 인덱싱
+
+이미 사용 중인 Obsidian vault가 있으면 그대로 인덱싱할 수 있습니다:
+
+```bash
+mindvault ingest ~/my-obsidian-vault
+```
+
+MindVault가 자동으로 처리하는 것:
+
+- `.md` 파일 헤더 → 그래프 노드
+- `[[wikilinks]]` → 그래프 엣지 (기존 vault의 연결 구조 보존)
+- BM25 검색 인덱스 자동 구축
+
+그 후 3-layer 질의를 기존 vault에 그대로 올릴 수 있습니다:
+
+```bash
+mindvault query "프로젝트 R의 주요 결정사항"
+```
+
+### 패턴 C: 코드 + 노트 통합 검색
+
+코드 프로젝트(패턴 A)와 Obsidian 노트(패턴 B)를 **둘 다** 인덱싱해두면 하나의 지식 그래프로 연결됩니다:
+
+```bash
+mindvault global ~/projects          # 코드 프로젝트 전체
+mindvault ingest ~/my-obsidian-vault # 노트 vault
+mindvault query "인증 모듈의 설계 배경" --global
+```
+
+→ 코드 구조(Graph Layer) + Obsidian 노트의 설계 결정(Wiki Layer)이 하나의 답변에 통합됩니다.
+
+> **Tip**: Obsidian의 "Folder as vault" 기능으로 `mindvault-out/wiki/`를 바로 열 수 있습니다. 별도 복사나 심볼릭 링크 불필요.
+
+---
+
 ## LLM 설정
 
 MindVault는 시맨틱 추출(코드의 의도/목적 분석)을 위해 LLM을 사용합니다. **LLM이 없어도 AST 기반 구조 분석은 정상 동작합니다.**
@@ -608,5 +664,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.2.9 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.2.10 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
