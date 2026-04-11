@@ -427,15 +427,108 @@ def extract_document_structure(doc_files: list[Path]) -> dict:
     }
 
 
+_FRONTMATTER_KEY_RE = re.compile(r"^([\w_-]+)\s*:\s*(.*)$")
+_FRONTMATTER_LIST_RE = re.compile(r"^\[(.*)\]$")
+_INLINE_TAG_RE = re.compile(r"(?:^|\s)#([A-Za-z][\w/-]*)")
+
+
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    """Parse minimal YAML frontmatter from the top of a markdown file.
+
+    Supports:
+        key: value
+        key: [item1, item2]
+        key:
+          - item1
+          - item2
+
+    Returns (metadata_dict, remaining_text). If no frontmatter is found,
+    returns ({}, original_text).
+    """
+    if not text.startswith("---"):
+        return {}, text
+    # Require a newline after the opening --- marker
+    first_nl = text.find("\n")
+    if first_nl == -1 or text[3:first_nl].strip():
+        return {}, text
+    body = text[first_nl + 1:]
+    close_match = re.search(r"^---\s*$", body, flags=re.MULTILINE)
+    if not close_match:
+        return {}, text
+    yaml_block = body[:close_match.start()]
+    remaining = body[close_match.end():].lstrip("\r\n")
+
+    metadata: dict = {}
+    current_key: str | None = None
+    for raw_line in yaml_block.splitlines():
+        line = raw_line.rstrip()
+        if not line or line.lstrip().startswith("#"):
+            continue
+        # YAML list continuation: "  - item"
+        if line.lstrip().startswith("- ") and current_key is not None:
+            item = line.lstrip()[2:].strip().strip('"').strip("'")
+            if not isinstance(metadata.get(current_key), list):
+                metadata[current_key] = []
+            if item:
+                metadata[current_key].append(item)
+            continue
+        kv = _FRONTMATTER_KEY_RE.match(line)
+        if not kv:
+            continue
+        key, raw_value = kv.group(1), kv.group(2).strip()
+        if not raw_value:
+            metadata[key] = []
+            current_key = key
+            continue
+        inline_list = _FRONTMATTER_LIST_RE.match(raw_value)
+        if inline_list:
+            items = [
+                part.strip().strip('"').strip("'")
+                for part in inline_list.group(1).split(",")
+                if part.strip()
+            ]
+            metadata[key] = items
+        else:
+            metadata[key] = raw_value.strip('"').strip("'")
+        current_key = key
+    return metadata, remaining
+
+
+def _extract_inline_tags(line: str) -> set[str]:
+    """Extract Obsidian-style #tags from a single line of prose.
+
+    Skips pure numbers (#123), hex colors (#fff / #ffffff), and anything that
+    starts with a digit. Matches at line start or after whitespace to avoid
+    catching things like `array[#index]` or preprocessor `#include`.
+    """
+    tags: set[str] = set()
+    for m in _INLINE_TAG_RE.finditer(line):
+        tag = m.group(1)
+        if tag[0].isdigit():
+            continue
+        # Hex color: 3, 4, 6, or 8 hex chars
+        if re.fullmatch(r"[0-9a-fA-F]{3,8}", tag):
+            continue
+        tags.add(tag)
+    return tags
+
+
 def _parse_markdown(
     file_path: Path, filestem: str, source_file: str,
     add_node, add_edge, heading_slug,
 ) -> None:
-    """Parse markdown file for headers, links, code blocks, wikilinks."""
+    """Parse markdown file for headers, links, code blocks, wikilinks.
+
+    Obsidian-aware: strips YAML frontmatter, captures frontmatter metadata and
+    inline #tags on the nearest header node.
+    """
     try:
         text = file_path.read_text(encoding="utf-8", errors="ignore")
     except (OSError, IOError):
         return
+
+    # Strip YAML frontmatter (Obsidian / Jekyll / Hugo)
+    frontmatter, text = _parse_frontmatter(text)
 
     lines = text.split("\n")
     # Stack of (depth, node_id) for parent-child tracking
@@ -443,6 +536,9 @@ def _parse_markdown(
     in_code_block = False
     code_lang = None
     current_header_id = None
+    # Metadata to attach to the first header node we encounter
+    pending_frontmatter: dict | None = frontmatter if frontmatter else None
+    inline_tags: set[str] = set()
 
     for i, line in enumerate(lines):
         # Code block toggle
@@ -478,7 +574,7 @@ def _parse_markdown(
             continue
 
         # Header detection
-        header_match = re.match(r"^(#{1,3})\s+(.+)", line)
+        header_match = re.match(r"^(#{1,6})\s+(.+)", line)
         if header_match:
             depth = len(header_match.group(1))
             title = header_match.group(2).strip()
@@ -512,6 +608,9 @@ def _parse_markdown(
             header_stack.append((depth, node_id))
             continue
 
+        # Collect inline #tags (Obsidian-style)
+        inline_tags |= _extract_inline_tags(line)
+
         # Markdown links [text](url)
         for m in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", line):
             url = m.group(2)
@@ -542,6 +641,43 @@ def _parse_markdown(
                     "confidence_score": 1.0,
                     "source_file": source_file,
                 })
+
+    # Post-process: if we captured frontmatter or inline #tags, emit a
+    # file-level synthetic node that aggregates metadata for the whole note.
+    # This node coexists with header nodes (contains edge from file → first header).
+    combined_tags: set[str] = set(inline_tags)
+    if pending_frontmatter:
+        fm_tags = pending_frontmatter.get("tags")
+        if isinstance(fm_tags, list):
+            combined_tags.update(str(t) for t in fm_tags)
+        elif isinstance(fm_tags, str):
+            combined_tags.add(fm_tags)
+
+    if pending_frontmatter or combined_tags:
+        file_node_id = f"{filestem}_file"
+        synth_node: dict = {
+            "id": file_node_id,
+            "label": pending_frontmatter.get("title", filestem) if pending_frontmatter else filestem,
+            "file_type": "document",
+            "source_file": source_file,
+            "source_location": "file",
+        }
+        if pending_frontmatter:
+            synth_node["metadata"] = pending_frontmatter
+        if combined_tags:
+            synth_node["tags"] = sorted(combined_tags)
+        add_node(synth_node)
+        # Link file node to the first header if one exists
+        if header_stack:
+            first_header_id = header_stack[0][1]
+            add_edge({
+                "source": file_node_id,
+                "target": first_header_id,
+                "relation": "contains",
+                "confidence": "EXTRACTED",
+                "confidence_score": 1.0,
+                "source_file": source_file,
+            })
 
 
 def _parse_text(

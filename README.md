@@ -392,6 +392,33 @@ mindvault query "인증 모듈의 설계 배경" --global
 
 > **Tip**: Obsidian의 "Folder as vault" 기능으로 `mindvault-out/wiki/`를 바로 열 수 있습니다. 별도 복사나 심볼릭 링크 불필요.
 
+### Obsidian 네이티브 기능 지원 (v0.3.0+)
+
+v0.3.0부터 Obsidian vault 인덱싱 시 다음 기능이 자동으로 동작합니다:
+
+| 기능 | 설명 |
+|------|------|
+| **YAML frontmatter 파싱** | `---` 블록의 `title`, `tags`, `aliases` 등 메타데이터를 첫 번째 헤더 노드(또는 파일 노드)에 자동 부착 |
+| **인라인 `#tags` 추출** | 본문 내 `#project`, `#auth`, `#nested/tag` 등을 자동 수집 (숫자/HTML 컬러 코드는 제외) |
+| **재귀 디렉토리 순회** | `mindvault ingest ~/my-vault` 가 하위 폴더 전체를 자동 탐색 |
+| **자동 exclude** | `.obsidian/`, `.trash/`, `.stfolder/`, `.stversions/` 등 내부 디렉토리 건너뜀 |
+
+예시 — 프론트매터가 있는 Obsidian 노트:
+
+```markdown
+---
+title: Auth Rewrite Plan
+tags: [project, auth, 2026-q2]
+status: in-progress
+---
+
+# Auth Rewrite Plan
+
+#architecture 관련 결정은 [[ADR-007]]에 정리됨. #security 리뷰 통과 후 배포.
+```
+
+→ 이 파일은 `metadata: {title, tags, status}`가 헤더 노드에 부착되고, `#architecture`, `#security` 태그가 노드에 추가되며, `[[ADR-007]]` 링크는 그래프 엣지로 변환됩니다.
+
 ---
 
 ## LLM 설정
@@ -664,5 +691,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.2.10 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.3.0 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

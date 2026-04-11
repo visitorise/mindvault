@@ -12,6 +12,8 @@ SKIP_DIRS = {
     "coverage", ".nyc_output", ".cache", ".turbo",
     "ios", "android", "Pods", ".expo", ".dart_tool",
     "macos", "windows", "linux", "web",
+    # Obsidian vault internals
+    ".obsidian", ".trash", ".stfolder", ".stversions",
 }
 
 EXT_MAP: dict[str, str] = {}

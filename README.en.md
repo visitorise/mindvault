@@ -394,6 +394,33 @@ mindvault query "rationale behind the auth module" --global
 
 > **Tip**: Use Obsidian's "Folder as vault" feature to open `mindvault-out/wiki/` directly — no copying or symlinks needed.
 
+### Native Obsidian features (v0.3.0+)
+
+Starting with v0.3.0, ingesting an Obsidian vault automatically handles:
+
+| Feature | Description |
+|---------|-------------|
+| **YAML frontmatter parsing** | `title`, `tags`, `aliases`, etc. inside `---` blocks are attached to the first header (or a synthetic file node) as metadata |
+| **Inline `#tags`** | `#project`, `#auth`, `#nested/tag` in prose are collected per note (numeric / hex-color strings are skipped) |
+| **Recursive directory walk** | `mindvault ingest ~/my-vault` now traverses subfolders |
+| **Auto-excluded dirs** | `.obsidian/`, `.trash/`, `.stfolder/`, `.stversions/` are skipped by default |
+
+Example — a real Obsidian note with frontmatter and tags:
+
+```markdown
+---
+title: Auth Rewrite Plan
+tags: [project, auth, 2026-q2]
+status: in-progress
+---
+
+# Auth Rewrite Plan
+
+#architecture decisions live in [[ADR-007]]. Ship after #security review.
+```
+
+→ The resulting graph node carries `metadata: {title, tags, status}`, inherits `#architecture` and `#security` as tags, and the `[[ADR-007]]` wikilink becomes a graph edge.
+
 ---
 
 ## LLM Configuration
@@ -666,5 +693,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.2.10 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.3.0 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

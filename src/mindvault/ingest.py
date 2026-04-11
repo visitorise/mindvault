@@ -545,12 +545,21 @@ def ingest(source: str, output_dir: Path) -> dict:
         return ingest_file(path, output_dir)
 
     if path.is_dir():
-        # Ingest all files in directory
+        # Recursively ingest all supported files, honoring SKIP_DIRS (incl. .obsidian)
+        from mindvault.detect import SKIP_DIRS
+        import os as _os
+
         total_nodes = 0
         total_edges = 0
         files_processed = 0
-        for child in sorted(path.iterdir()):
-            if child.is_file() and not child.name.startswith("."):
+
+        for dirpath, dirnames, filenames in _os.walk(path):
+            # Prune traversal in-place — skip VCS, build artifacts, Obsidian internals, etc.
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
+            for fname in sorted(filenames):
+                if fname.startswith("."):
+                    continue
+                child = Path(dirpath) / fname
                 result = ingest_file(child, output_dir)
                 if not result.get("skipped") and not result.get("error"):
                     total_nodes += result.get("nodes", 0)
