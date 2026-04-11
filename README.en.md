@@ -260,7 +260,9 @@ mindvault-out/
 
 | Command | Description |
 |--------|------|
-| `mindvault config llm <url>` | Sets the LLM endpoint |
+| `mindvault config llm <url>` | Sets a generic OpenAI-compatible LLM endpoint |
+| `mindvault config ollama-host <url>` | Override Ollama host (e.g. WSL → Windows) |
+| `mindvault config llm-model <name>` | Force a specific model name (overrides auto-detection) |
 | `mindvault config auto-approve true/false` | Sets auto-approval for API calls |
 | `mindvault config show` | Displays current configuration |
 | `mindvault lint` | Checks wiki consistency + graph health |
@@ -357,8 +359,16 @@ It prioritizes local LLMs, and if none are found, it uses subscribed tokens or a
 > **Most users are Claude Code/Cursor/Copilot subscribers.** Running with the `/mindvault` skill enables semantic extraction without additional setup.
 
 ```bash
-# Manually set LLM endpoint
+# Generic OpenAI-compatible LLM endpoint
 mindvault config llm http://localhost:8080
+
+# Override Ollama host (e.g. WSL reaching Windows-side Ollama)
+mindvault config ollama-host http://172.28.112.1:11434
+# The $OLLAMA_HOST environment variable is honored as well.
+
+# Force a specific model name (overrides auto-detection)
+mindvault config llm-model gemma3:e4b
+mindvault config llm-model qwen3:4b
 
 # Auto-approve API usage (no prompting)
 mindvault config auto-approve true
@@ -366,6 +376,8 @@ mindvault config auto-approve true
 # Check current configuration
 mindvault config show
 ```
+
+> **v0.2.9+**: Ollama now auto-discovers installed models via `/api/tags` and prefers gemma3, gemma, qwen3, qwen in that order. For WSL → Windows setups, point MindVault at the Windows host IP with `ollama-host` or `$OLLAMA_HOST`.
 
 ---
 
@@ -592,5 +604,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.2.8 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.2.9 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

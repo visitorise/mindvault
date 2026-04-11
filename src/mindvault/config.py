@@ -13,6 +13,8 @@ _DEFAULTS = {
     "auto_approve_api": False,
     "max_tokens_per_file": 4000,
     "preferred_provider": None,
+    "llm_model": None,
+    "ollama_host": None,
 }
 
 

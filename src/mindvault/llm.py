@@ -16,14 +16,29 @@ def detect_llm() -> dict:
     Priority:
     1. config.llm_endpoint (user override)
     2. localhost:8080 (Gemma MLX)
-    3. localhost:11434 (Ollama)
+    3. Ollama (config.ollama_host → $OLLAMA_HOST → localhost:11434)
     4. ANTHROPIC_API_KEY env var
     5. OPENAI_API_KEY env var
     6. None
 
+    Honors `config.llm_model` as a final override for any detected provider.
+
     Returns:
         Dict with keys: provider, endpoint, model, is_local, api_key.
     """
+    from mindvault.config import get as cfg_get
+
+    result = _detect_llm_raw()
+    # Final override: user can force a specific model name on any provider
+    model_override = cfg_get("llm_model")
+    if model_override and result.get("provider"):
+        result = dict(result)
+        result["model"] = model_override
+    return result
+
+
+def _detect_llm_raw() -> dict:
+    """Inner detection. See detect_llm for priority order."""
     from mindvault.config import get as cfg_get
 
     empty = {"provider": None, "endpoint": None, "model": None, "is_local": False, "api_key": None}
@@ -53,13 +68,20 @@ def detect_llm() -> dict:
                 "api_key": None,
             }
 
-    # 3. Ollama at localhost:11434
+    # 3. Ollama — honor config.ollama_host, then $OLLAMA_HOST, then localhost
     if preferred in (None, "ollama"):
-        if _ping_local("http://localhost:11434"):
+        ollama_host = (
+            cfg_get("ollama_host")
+            or os.environ.get("OLLAMA_HOST")
+            or "http://localhost:11434"
+        )
+        if not ollama_host.startswith(("http://", "https://")):
+            ollama_host = f"http://{ollama_host}"
+        if _ping_local(ollama_host):
             return {
                 "provider": "ollama",
-                "endpoint": "http://localhost:11434",
-                "model": "llama3",
+                "endpoint": ollama_host,
+                "model": _detect_ollama_model(ollama_host),
                 "is_local": True,
                 "api_key": None,
             }
@@ -109,6 +131,29 @@ def _detect_gemma_model(base_url: str) -> str | None:
     except Exception:
         pass
     return None
+
+
+def _detect_ollama_model(base_url: str) -> str:
+    """Detect best available Ollama model, preferring gemma3, gemma, qwen3, qwen.
+
+    Queries Ollama's `/api/tags` endpoint to list installed models.
+    Falls back to 'llama3' if nothing is found.
+    """
+    try:
+        req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
+        resp = urllib.request.urlopen(req, timeout=2)
+        data = json.loads(resp.read().decode("utf-8"))
+        models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+        if not models:
+            return "llama3"
+        # Prefer recent small local models in order
+        for pref in ("gemma3", "gemma", "qwen3", "qwen", "llama3"):
+            for m in models:
+                if pref in m.lower():
+                    return m
+        return models[0]
+    except Exception:
+        return "llama3"
 
 
 def _ping_local(base_url: str) -> bool:

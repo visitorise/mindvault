@@ -259,6 +259,24 @@ def cmd_config(args) -> None:
             print(f"preferred_provider set to: {args.value}")
         return
 
+    if action == "ollama-host":
+        if not args.value:
+            from mindvault.config import get as get_config
+            print(f"ollama_host: {get_config('ollama_host')}")
+        else:
+            set_config("ollama_host", args.value)
+            print(f"ollama_host set to: {args.value}")
+        return
+
+    if action == "llm-model":
+        if not args.value:
+            from mindvault.config import get as get_config
+            print(f"llm_model: {get_config('llm_model')}")
+        else:
+            set_config("llm_model", args.value)
+            print(f"llm_model set to: {args.value}")
+        return
+
     print(f"Unknown config action: {action}")
 
 
@@ -485,7 +503,7 @@ def main() -> None:
 
     # config
     sub_config = subparsers.add_parser("config", help="Manage MindVault configuration")
-    sub_config.add_argument("config_action", choices=["llm", "auto-approve", "provider", "show"], help="Config action")
+    sub_config.add_argument("config_action", choices=["llm", "auto-approve", "provider", "ollama-host", "llm-model", "show"], help="Config action")
     sub_config.add_argument("value", nargs="?", default=None, help="Value to set")
 
     # daemon
