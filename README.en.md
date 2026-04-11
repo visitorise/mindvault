@@ -130,15 +130,11 @@ mindvault ingest /opt/docs/api-reference/
 
 | Format | Status | Notes |
 |--------|--------|-------|
-| `.md`, `.txt`, `.rst` | ✅ Built-in | No extra install |
+| `.md`, `.txt`, `.rst` | ✅ Built-in | — |
 | `.pdf` | ✅ Built-in | Requires system `pdftotext` |
-| `.docx`, `.xlsx`, `.pptx` | ✅ v0.2.6+ | Enable with `pip install mindvault-ai[office]` |
+| `.docx`, `.xlsx`, `.pptx` | ✅ Built-in (v0.2.7+) | Word / Excel / PowerPoint auto-detected |
 
-To ingest Office documents (Word / Excel / PowerPoint), install the optional extra:
-
-```bash
-pip install mindvault-ai[office]
-```
+No extra install is needed — just run `mindvault ingest /path/to/docs` and all the above formats are extracted automatically.
 
 ### 2. Use
 
@@ -596,5 +592,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.2.6 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.2.7 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

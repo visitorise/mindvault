@@ -130,15 +130,11 @@ mindvault ingest /opt/docs/api-reference/
 
 | 포맷 | 상태 | 비고 |
 |------|------|------|
-| `.md`, `.txt`, `.rst` | ✅ 기본 지원 | 별도 설치 불필요 |
+| `.md`, `.txt`, `.rst` | ✅ 기본 지원 | — |
 | `.pdf` | ✅ 기본 지원 | 시스템에 `pdftotext` 필요 |
-| `.docx`, `.xlsx`, `.pptx` | ✅ v0.2.6+ | `pip install mindvault-ai[office]` 로 활성화 |
+| `.docx`, `.xlsx`, `.pptx` | ✅ v0.2.7+ 기본 지원 | Word / Excel / PowerPoint 자동 인식 |
 
-Office 문서(워드/엑셀/파워포인트)를 인덱싱하려면 optional extra를 설치하세요:
-
-```bash
-pip install mindvault-ai[office]
-```
+추가 설치 없이 `mindvault ingest /path/to/문서폴더` 만 실행하면 위 포맷을 전부 자동 추출합니다.
 
 ### 2. 사용
 
@@ -596,5 +592,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.2.6 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.2.7 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
