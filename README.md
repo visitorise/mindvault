@@ -79,6 +79,12 @@ mindvault install
 ### 요구사항
 
 - **Python 3.10+**
+- **파이썬 의존성 (pip install 시 자동 설치)**
+  - `networkx` — 지식 그래프 엔진
+  - `tree-sitter` + 13개 언어 파서 — AST 기반 코드 구조 분석
+  - `python-docx`, `openpyxl`, `python-pptx` — Office 문서(.docx/.xlsx/.pptx) 추출 (v0.2.7+)
+- **선택적 시스템 바이너리**
+  - `pdftotext` — PDF 추출 시 필요 (macOS: `brew install poppler`, Ubuntu: `apt install poppler-utils`, Windows: [Xpdf tools](https://www.xpdfreader.com/download.html))
 - LLM 없이도 AST 기반 코드 구조 분석 동작
 - 시맨틱 추출 시 로컬 LLM 또는 API 키 필요 (아래 [LLM 설정](#llm-설정) 참고)
 

@@ -79,6 +79,12 @@ What `mindvault install` performs automatically:
 ### Requirements
 
 - **Python 3.10+**
+- **Python dependencies (auto-installed via pip)**
+  - `networkx` — knowledge graph engine
+  - `tree-sitter` + 13 language parsers — AST-based code structure analysis
+  - `python-docx`, `openpyxl`, `python-pptx` — Office document (.docx / .xlsx / .pptx) extraction (v0.2.7+)
+- **Optional system binaries**
+  - `pdftotext` — required only for PDF extraction (macOS: `brew install poppler`, Ubuntu: `apt install poppler-utils`, Windows: [Xpdf tools](https://www.xpdfreader.com/download.html))
 - AST-based code structure analysis works without an LLM
 - Local LLM or API key required for semantic extraction (see [LLM Setup](#llm-configuration) below)
 
