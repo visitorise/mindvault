@@ -326,7 +326,7 @@ tree-sitter 기반 AST 추출을 지원하는 13개 언어:
 | **Gemini Code Assist** | `.gemini/styleguide.md` |
 | **Cline** | `.clinerules` |
 | **Aider** | `CONVENTIONS.md` |
-| **OpenAI Codex CLI** | `AGENTS.md` |
+| **AGENTS.md Standard** (OpenAI Codex CLI, Google Antigravity 등) | `AGENTS.md` |
 | **Google Gemini CLI** | `GEMINI.md` |
 | **Qwen Code** | `QWEN.md` |
 
@@ -592,5 +592,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.2.7 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.2.8 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

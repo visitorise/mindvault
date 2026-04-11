@@ -49,7 +49,7 @@ AI_TOOLS = [
         "type": "create_or_append",
     },
     {
-        "name": "OpenAI Codex CLI",
+        "name": "AGENTS.md (Codex CLI, Antigravity)",
         "detect_files": ["AGENTS.md", ".codex"],
         "rules_file": "AGENTS.md",
         "type": "create_or_append",

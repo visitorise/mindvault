@@ -326,7 +326,7 @@ It automatically generates configuration files matching the detected tool upon r
 | **Gemini Code Assist** | `.gemini/styleguide.md` |
 | **Cline** | `.clinerules` |
 | **Aider** | `CONVENTIONS.md` |
-| **OpenAI Codex CLI** | `AGENTS.md` |
+| **AGENTS.md Standard** (OpenAI Codex CLI, Google Antigravity, ...) | `AGENTS.md` |
 | **Google Gemini CLI** | `GEMINI.md` |
 | **Qwen Code** | `QWEN.md` |
 
@@ -592,5 +592,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.2.7 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.2.8 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
