@@ -118,13 +118,89 @@ def _generate_labels(G, communities: dict[int, list[str]]) -> dict[int, str]:
     return labels
 
 
+def _finalize_and_export(
+    G: nx.DiGraph,
+    source_dir: Path,
+    output_dir: Path,
+    detection: dict,
+    *,
+    incremental: bool = True,
+    write_report: bool = True,
+) -> dict:
+    """Shared finalization tail: cluster → analyze → wiki → export → report.
+
+    Called by both ``compile()`` (full build) and ``run_incremental()`` (merged
+    partial build). Centralizes the logic that used to be duplicated across
+    both entry points (Codex finding #9).
+
+    Args:
+        G: NetworkX DiGraph built from an extraction result.
+        source_dir: Project root (for report metadata).
+        output_dir: MindVault output directory.
+        detection: Result of ``detect(source_dir)``; used for report stats.
+        incremental: If True and a wiki already exists, update only changed
+            nodes; otherwise regenerate the full wiki.
+        write_report: If True, write GRAPH_REPORT.md with gods/surprises stats.
+            Off for lightweight incremental updates that don't need the report.
+
+    Returns:
+        Dict with stats: {nodes, edges, communities, wiki_pages, cohesion, labels}.
+    """
+    # Cluster communities
+    communities = cluster(G)
+    cohesion = score_cohesion(G, communities)
+
+    # Generate labels
+    labels = _generate_labels(G, communities)
+
+    # Wiki: incremental if existing wiki is present, full otherwise
+    wiki_dir = output_dir / "wiki"
+    concepts_path = wiki_dir / "_concepts.json"
+    graph_path = output_dir / "graph.json"
+    if incremental and wiki_dir.exists() and concepts_path.exists():
+        # True incremental: diff old graph.json against new graph
+        changed_nodes = _find_changed_nodes(graph_path, G)
+        wiki_pages = update_wiki(G, changed_nodes, output_dir, cohesion=cohesion)
+    else:
+        wiki_pages = generate_wiki(G, communities, labels, output_dir, cohesion=cohesion)
+
+    # Export JSON (after wiki so next build can diff against this)
+    export_json(G, communities, output_dir / "graph.json")
+
+    # Export HTML
+    export_html(G, communities, labels, output_dir / "graph.html")
+
+    # Analysis + report (optional — expensive on large graphs)
+    if write_report:
+        gods = god_nodes(G)
+        surprises = surprising_connections(G, communities)
+        questions = suggest_questions(G, communities, labels)
+        report_md = generate_report(
+            G, communities, cohesion, labels, gods, surprises,
+            detection, str(source_dir), questions,
+        )
+        (output_dir / "GRAPH_REPORT.md").write_text(report_md, encoding="utf-8")
+
+    return {
+        "nodes": G.number_of_nodes(),
+        "edges": G.number_of_edges(),
+        "communities": len(communities),
+        "wiki_pages": wiki_pages,
+        "cohesion": cohesion,
+        "labels": labels,
+    }
+
+
 def compile(source_dir: Path, output_dir: Path, incremental: bool = True) -> dict:
-    """Full pipeline: detect -> extract_ast -> build_graph -> cluster -> analyze -> generate_wiki + export + report.
+    """Full pipeline: detect → extract → build → cluster → wiki → export → report.
 
     Args:
         source_dir: Root directory of the project to compile.
         output_dir: Directory for MindVault output.
-        incremental: If True, only reprocess changed files (not yet implemented, runs full).
+        incremental: If True and an existing wiki is present, perform
+            incremental wiki updates (changed-nodes only). Extraction itself
+            is always full — use ``pipeline.run_incremental`` for dirty-only
+            extraction.
 
     Returns:
         Dict with stats: {nodes, edges, communities, wiki_pages, total_words}.
@@ -138,55 +214,28 @@ def compile(source_dir: Path, output_dir: Path, incremental: bool = True) -> dic
     code_files = [source_dir / f for f in detection["files"].get("code", [])]
     doc_files = [source_dir / f for f in detection["files"].get("document", [])]
 
-    # 2. Extract AST + Document Structure + Semantic
-    ast_result = extract_ast(code_files)
-    doc_result = extract_document_structure(doc_files)
-    sem_result = extract_semantic(doc_files, output_dir)
+    # 2. Extract AST + Document Structure + Semantic.
+    # source_dir is passed as the canonical index_root so all node IDs are
+    # derived from project-relative paths (collision-safe across same-stem
+    # files in different directories).
+    ast_result = extract_ast(code_files, index_root=source_dir)
+    doc_result = extract_document_structure(doc_files, index_root=source_dir)
+    sem_result = extract_semantic(doc_files, output_dir, index_root=source_dir)
     extraction = _merge_extractions(ast_result, doc_result, sem_result)
 
     # 3. Build graph
     G = build_graph(extraction)
 
-    # 4. Cluster communities
-    communities = cluster(G)
-    cohesion = score_cohesion(G, communities)
-
-    # 5. Generate labels
-    labels = _generate_labels(G, communities)
-
-    # 6. Analyze
-    gods = god_nodes(G)
-    surprises = surprising_connections(G, communities)
-    questions = suggest_questions(G, communities, labels)
-
-    # 7. Generate wiki (incremental if wiki already exists)
-    wiki_dir = output_dir / "wiki"
-    concepts_path = wiki_dir / "_concepts.json"
-    graph_path = output_dir / "graph.json"
-    if wiki_dir.exists() and concepts_path.exists():
-        # True incremental: compare old graph.json with new graph
-        changed_nodes = _find_changed_nodes(graph_path, G)
-        wiki_pages = update_wiki(G, changed_nodes, output_dir, cohesion=cohesion)
-    else:
-        wiki_pages = generate_wiki(G, communities, labels, output_dir, cohesion=cohesion)
-
-    # 8. Export JSON (after wiki update so next build can diff against this)
-    export_json(G, communities, output_dir / "graph.json")
-
-    # 9. Export HTML
-    export_html(G, communities, labels, output_dir / "graph.html")
-
-    # 10. Generate report
-    report_md = generate_report(
-        G, communities, cohesion, labels, gods, surprises,
-        detection, str(source_dir), questions,
+    # 4. Finalize: cluster → wiki → export → report (shared with run_incremental)
+    stats = _finalize_and_export(
+        G, source_dir, output_dir, detection,
+        incremental=incremental, write_report=True,
     )
-    (output_dir / "GRAPH_REPORT.md").write_text(report_md, encoding="utf-8")
 
     return {
-        "nodes": G.number_of_nodes(),
-        "edges": G.number_of_edges(),
-        "communities": len(communities),
-        "wiki_pages": wiki_pages,
+        "nodes": stats["nodes"],
+        "edges": stats["edges"],
+        "communities": stats["communities"],
+        "wiki_pages": stats["wiki_pages"],
         "total_words": detection.get("total_words", 0),
     }

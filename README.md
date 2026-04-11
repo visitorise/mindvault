@@ -684,6 +684,51 @@ mindvault lint
 
 ---
 
+## 변경 내역 (v0.4.0)
+
+**Path-based canonical ID scheme** — 노드 ID가 파일 경로를 기반으로 생성되도록 리팩토링.
+
+### 무엇이 바뀌었나?
+
+기존 ID 스키마는 `{filestem}_{name}` (파일명 + 엔티티명)이었습니다. 이 방식은 같은 파일명이 다른 디렉토리에 있을 때 **ID 충돌**을 일으켰습니다:
+
+```
+src/auth/utils.py::def validate() → utils_validate
+src/db/utils.py::def validate()   → utils_validate  ← 동일 ID, 노드 병합 ❌
+```
+
+v0.4.0부터는 `{rel_path_slug}::{kind}::{local_slug}` 포맷을 사용합니다:
+
+```
+src/auth/utils.py::validate → src__auth__utils_py::function::validate
+src/db/utils.py::validate   → src__db__utils_py::function::validate   ✅
+```
+
+### 마이그레이션
+
+**자동 마이그레이션**: 기존 `graph.json`이 있는 프로젝트에서 `mindvault update` 또는 incremental 갱신을 돌리면, 첫 실행 시 자동으로 canonical 포맷으로 변환합니다 (1~10초, 1회성). 유저 작업 불필요.
+
+**폴백**: 자동 마이그레이션이 실패하면 (`source_file` 필드 누락 등) 콘솔에 다음 지시가 표시됩니다:
+
+```bash
+rm -rf mindvault-out
+mindvault install
+```
+
+### 기타 개선
+
+- **파이프라인 중앙화** — `compile()`과 `run_incremental()`의 중복 로직을 `_finalize_and_export()` 공통 헬퍼로 통합 (Codex Finding #9)
+- **회귀 테스트 스위트** — 60 → 98개. canonical ID, 마이그레이션, Codex 지적 사항 전부 커버.
+- `entity_type` 필드 추가 — 모든 노드에 `file`/`module`/`class`/`function`/`method`/`header`/`block`/`concept` 분류
+
+### 이전 변경
+
+- **v0.3.2** — tests/ 디렉토리 신설, 60개 회귀 테스트
+- **v0.3.1** — Codex 5건 패치 (Unicode 태그, frontmatter line offset, first_header_id 등)
+- **v0.3.0** — Obsidian 네이티브 기능 (frontmatter, inline #tags, 재귀 walk, .obsidian/ 제외)
+
+---
+
 ## 라이선스
 
 MIT
@@ -691,5 +736,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.3.2 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.4.0 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

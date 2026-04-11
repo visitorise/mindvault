@@ -59,7 +59,96 @@ def _sanitize_id(name: str) -> str:
     return re.sub(r"[^a-z0-9_]", "_", name.lower())
 
 
+# ---------------------------------------------------------------------------
+# Canonical ID scheme (v0.4.0+)
+# ---------------------------------------------------------------------------
+# Format: {rel_path_slug}::{kind}::{local_slug}
+#
+# rel_path_slug = relative path from index_root, path separators → "__",
+#                 non-[a-z0-9_] chars sanitized. Example: "src/auth/login.py"
+#                 → "src__auth__login_py".
+# kind          = entity type: file / module / class / function / header /
+#                 block / ref / concept / entity (free-form, sanitized).
+# local_slug    = _sanitize_id(entity_name) for named entities; empty for
+#                 file-level synthetic nodes.
+#
+# This replaces the pre-0.4.0 `{filestem}_{name}` scheme which collided
+# whenever two files in different directories shared a stem
+# (e.g. src/auth/utils.py::validate vs src/db/utils.py::validate).
+
+
+def _rel_path_slug(source_file: str | Path, index_root: str | Path | None) -> str:
+    """Compute a path-based slug for a source file.
+
+    Joins directory components with `__`, each sanitized. When `index_root`
+    is provided and the file lives under it, we use the relative path —
+    otherwise we fall back to the file's full path components with empty/
+    separator parts stripped, so same-stem files in different absolute
+    locations still get distinct slugs.
+    """
+    p = Path(source_file)
+    rel: Path | None = None
+    if index_root is not None:
+        try:
+            rel = p.resolve().relative_to(Path(index_root).resolve())
+        except (ValueError, OSError):
+            rel = None
+    if rel is None:
+        rel = p
+    parts = tuple(part for part in rel.parts if part not in ("", "/", "\\"))
+    if not parts:
+        return _sanitize_id(p.stem) or "root"
+    return "__".join(_sanitize_id(part) for part in parts)
+
+
+def _make_canonical_id(
+    source_file: str | Path,
+    kind: str,
+    entity_name: str = "",
+    index_root: str | Path | None = None,
+) -> str:
+    """Build a path-based canonical node ID.
+
+    Format: ``{rel_path_slug}::{kind}::{local_slug}``
+
+    Args:
+        source_file: Path to the file this entity came from.
+        kind: Entity type — "file", "module", "class", "function", "header",
+            "block", "ref", "concept", "entity" (free-form; sanitized).
+        entity_name: Human name of the entity. Empty for file-level synthetic
+            nodes.
+        index_root: Root directory for computing relative path. None falls
+            back to the file's own path parts.
+
+    Examples:
+        >>> _make_canonical_id("/proj/notes/plan.md", "file", "", "/proj")
+        'notes__plan_md::file::'
+        >>> _make_canonical_id("/proj/notes/plan.md", "header", "Auth Rewrite Plan", "/proj")
+        'notes__plan_md::header::auth_rewrite_plan'
+        >>> _make_canonical_id("/proj/src/auth/utils.py", "function", "validate", "/proj")
+        'src__auth__utils_py::function::validate'
+    """
+    prefix = _rel_path_slug(source_file, index_root)
+    kind_clean = _sanitize_id(kind) or "entity"
+    local = _sanitize_id(entity_name) if entity_name else ""
+    return f"{prefix}::{kind_clean}::{local}"
+
+
+def _make_ref_id(target_name: str) -> str:
+    """Build an unresolved cross-file reference ID.
+
+    Used for imports / wikilinks / markdown links whose target file is not
+    yet known. Graph build can later rewire these to real canonical IDs by
+    matching labels or file stems.
+    """
+    return f"__unresolved__::ref::{_sanitize_id(target_name)}"
+
+
 def _node_id(filestem: str, entity_name: str) -> str:
+    """Deprecated pre-0.4.0 ID helper. Kept only so any unreachable legacy
+    paths do not NameError at import; all live call sites must use
+    ``_make_canonical_id`` instead.
+    """
     return f"{_sanitize_id(filestem)}_{_sanitize_id(entity_name)}"
 
 
@@ -183,8 +272,14 @@ def _get_superclasses(node) -> list[str]:
     return supers
 
 
-def _process_file(file_path: Path, lang) -> tuple[list[dict], list[dict]]:
-    """Process a single file and return (nodes, edges)."""
+def _process_file(
+    file_path: Path, lang, index_root: Path | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Process a single file and return (nodes, edges).
+
+    ``index_root`` is the project root for computing canonical path-based IDs.
+    When None, canonical IDs fall back to the file's own path parts.
+    """
     nodes = []
     edges = []
 
@@ -201,15 +296,18 @@ def _process_file(file_path: Path, lang) -> tuple[list[dict], list[dict]]:
         # Still try to extract what we can
         pass
 
-    filestem = _sanitize_id(file_path.stem)
     source_file = str(file_path)
 
+    def _cid(kind: str, name: str = "") -> str:
+        return _make_canonical_id(source_file, kind, name, index_root)
+
     # Module node
-    module_id = _node_id(filestem, "module")
+    module_id = _cid("module", file_path.stem)
     nodes.append({
         "id": module_id,
         "label": file_path.stem,
         "file_type": "code",
+        "entity_type": "module",
         "source_file": source_file,
         "source_location": None,
     })
@@ -230,12 +328,14 @@ def _process_file(file_path: Path, lang) -> tuple[list[dict], list[dict]]:
                 if not name:
                     continue
 
-                nid = _node_id(filestem, name)
+                kind = "method" if parent_class_id else "function"
+                nid = _cid(kind, name)
                 loc = f"L{child.start_point[0] + 1}"
                 nodes.append({
                     "id": nid,
                     "label": name,
                     "file_type": "code",
+                    "entity_type": kind,
                     "source_file": source_file,
                     "source_location": loc,
                 })
@@ -253,10 +353,11 @@ def _process_file(file_path: Path, lang) -> tuple[list[dict], list[dict]]:
                     "weight": 1.0,
                 })
 
-                # Extract calls within this function
+                # Extract calls within this function — targets are unresolved
+                # refs until build_graph rewires them (may live in another file).
                 calls = _extract_calls(child)
                 for call_name in calls:
-                    call_target_id = _node_id(filestem, call_name)
+                    call_target_id = _make_ref_id(call_name)
                     edges.append({
                         "source": nid,
                         "target": call_target_id,
@@ -276,12 +377,13 @@ def _process_file(file_path: Path, lang) -> tuple[list[dict], list[dict]]:
                 if not name:
                     continue
 
-                nid = _node_id(filestem, name)
+                nid = _cid("class", name)
                 loc = f"L{child.start_point[0] + 1}"
                 nodes.append({
                     "id": nid,
                     "label": name,
                     "file_type": "code",
+                    "entity_type": "class",
                     "source_file": source_file,
                     "source_location": loc,
                 })
@@ -298,10 +400,10 @@ def _process_file(file_path: Path, lang) -> tuple[list[dict], list[dict]]:
                     "weight": 1.0,
                 })
 
-                # extends edges
+                # extends edges — target class may live in another file
                 supers = _get_superclasses(child)
                 for sup in supers:
-                    sup_id = _node_id(filestem, sup)
+                    sup_id = _make_ref_id(sup)
                     edges.append({
                         "source": nid,
                         "target": sup_id,
@@ -320,15 +422,13 @@ def _process_file(file_path: Path, lang) -> tuple[list[dict], list[dict]]:
 
     visit_definitions(root)
 
-    # Extract imports
+    # Extract imports — targets are cross-file refs, resolved later by build
     def visit_imports(node):
         for child in node.children:
             if child.type in _IMPORT_TYPES:
                 targets = _extract_imports(child)
                 for target in targets:
-                    # Create import target ID based on the imported module/name
-                    target_stem = _sanitize_id(target.split(".")[-1])
-                    target_id = f"{target_stem}_module"
+                    target_id = _make_ref_id(target.split(".")[-1])
                     edges.append({
                         "source": module_id,
                         "target": target_id,
@@ -344,11 +444,16 @@ def _process_file(file_path: Path, lang) -> tuple[list[dict], list[dict]]:
     return nodes, edges
 
 
-def extract_ast(code_files: list[Path]) -> dict:
+def extract_ast(
+    code_files: list[Path], index_root: Path | None = None,
+) -> dict:
     """AST extraction via tree-sitter.
 
     Args:
         code_files: List of source code file paths.
+        index_root: Project root for computing canonical path-based node IDs.
+            When None, canonical IDs fall back to the file's own path parts
+            (still collision-safe for absolute paths, but slugs may be longer).
 
     Returns:
         Dict with keys: nodes (list), edges (list), input_tokens (int), output_tokens (int).
@@ -363,7 +468,7 @@ def extract_ast(code_files: list[Path]) -> dict:
             continue  # Skip unsupported extensions silently
 
         try:
-            nodes, edges = _process_file(file_path, lang)
+            nodes, edges = _process_file(file_path, lang, index_root=index_root)
             all_nodes.extend(nodes)
             all_edges.extend(edges)
         except Exception:
@@ -378,12 +483,18 @@ def extract_ast(code_files: list[Path]) -> dict:
     }
 
 
-def extract_document_structure(doc_files: list[Path]) -> dict:
+def extract_document_structure(
+    doc_files: list[Path], index_root: Path | None = None,
+) -> dict:
     """Extract structure from document files (no LLM, 0 tokens).
 
     Supports: .md (headers, links, code blocks, wikilinks),
               .txt/.rst (section detection, RST underline headers),
               .pdf (pdftotext, silent skip if unavailable).
+
+    Args:
+        doc_files: List of document file paths.
+        index_root: Project root for canonical path-based IDs (see extract_ast).
 
     Returns: {nodes: [], edges: [], input_tokens: 0, output_tokens: 0}
     """
@@ -407,15 +518,24 @@ def extract_document_structure(doc_files: list[Path]) -> dict:
             continue
         ext = file_path.suffix.lower()
         source_file = str(file_path)
-        filestem = _sanitize_id(file_path.stem)
 
         try:
             if ext == ".md":
-                _parse_markdown(file_path, filestem, source_file, _add_node, _add_edge, _heading_slug)
+                _parse_markdown(
+                    file_path, source_file, _add_node, _add_edge,
+                    _heading_slug, index_root=index_root,
+                )
             elif ext in (".txt", ".rst"):
-                _parse_text(file_path, filestem, source_file, _add_node, _add_edge, _heading_slug, is_rst=(ext == ".rst"))
+                _parse_text(
+                    file_path, source_file, _add_node, _add_edge,
+                    _heading_slug, is_rst=(ext == ".rst"),
+                    index_root=index_root,
+                )
             elif ext == ".pdf":
-                _parse_pdf(file_path, filestem, source_file, _add_node, _add_edge, _heading_slug)
+                _parse_pdf(
+                    file_path, source_file, _add_node, _add_edge,
+                    _heading_slug, index_root=index_root,
+                )
         except Exception:
             continue
 
@@ -531,8 +651,9 @@ def _extract_inline_tags(line: str) -> set[str]:
 
 
 def _parse_markdown(
-    file_path: Path, filestem: str, source_file: str,
+    file_path: Path, source_file: str,
     add_node, add_edge, heading_slug,
+    index_root: Path | None = None,
 ) -> None:
     """Parse markdown file for headers, links, code blocks, wikilinks.
 
@@ -543,6 +664,9 @@ def _parse_markdown(
         text = file_path.read_text(encoding="utf-8", errors="ignore")
     except (OSError, IOError):
         return
+
+    def _cid(kind: str, name: str = "") -> str:
+        return _make_canonical_id(source_file, kind, name, index_root)
 
     # Strip YAML frontmatter (Obsidian / Jekyll / Hugo). line_offset keeps
     # source_location line numbers aligned with the original file.
@@ -574,11 +698,12 @@ def _parse_markdown(
                 code_lang = lang_match.group(1) if lang_match else None
                 # Create has_code_example edge from current header
                 if current_header_id and code_lang:
-                    lang_node_id = f"{filestem}_{_sanitize_id(code_lang)}_lang"
+                    lang_node_id = _cid("block", code_lang)
                     add_node({
                         "id": lang_node_id,
                         "label": code_lang,
                         "file_type": "document",
+                        "entity_type": "block",
                         "source_file": source_file,
                         "source_location": _line_label(i),
                     })
@@ -606,7 +731,7 @@ def _parse_markdown(
             slug = heading_slug(title)
             if not slug:
                 continue
-            node_id = f"{filestem}_{slug}"
+            node_id = _cid("header", slug)
             current_header_id = node_id
             if first_header_id is None:
                 first_header_id = node_id
@@ -615,6 +740,7 @@ def _parse_markdown(
                 "id": node_id,
                 "label": title,
                 "file_type": "document",
+                "entity_type": "header",
                 "source_file": source_file,
                 "source_location": _line_label(i),
             })
@@ -638,14 +764,13 @@ def _parse_markdown(
         # Collect inline #tags (Obsidian-style)
         inline_tags |= _extract_inline_tags(line)
 
-        # Markdown links [text](url)
+        # Markdown links [text](url) — target file not yet resolved
         for m in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", line):
             url = m.group(2)
-            # Only internal references (relative paths, no http)
             if not url.startswith("http") and not url.startswith("#"):
-                target_stem = _sanitize_id(Path(url.split("#")[0]).stem)
+                target_stem = Path(url.split("#")[0]).stem
                 if target_stem and current_header_id:
-                    target_id = f"{target_stem}_module"
+                    target_id = _make_ref_id(target_stem)
                     add_edge({
                         "source": current_header_id,
                         "target": target_id,
@@ -655,10 +780,10 @@ def _parse_markdown(
                         "source_file": source_file,
                     })
 
-        # Wikilinks [[target]]
+        # Wikilinks [[target]] — Obsidian-style cross-note reference
         for m in re.finditer(r"\[\[([^\]]+)\]\]", line):
             target_text = m.group(1)
-            target_id = f"{_sanitize_id(target_text)}_module"
+            target_id = _make_ref_id(target_text)
             if current_header_id:
                 add_edge({
                     "source": current_header_id,
@@ -681,11 +806,15 @@ def _parse_markdown(
             combined_tags.add(fm_tags)
 
     if pending_frontmatter or combined_tags:
-        file_node_id = f"{filestem}_file"
+        file_node_id = _cid("file")
         synth_node: dict = {
             "id": file_node_id,
-            "label": pending_frontmatter.get("title", filestem) if pending_frontmatter else filestem,
+            "label": (
+                pending_frontmatter.get("title", file_path.stem)
+                if pending_frontmatter else file_path.stem
+            ),
             "file_type": "document",
+            "entity_type": "file",
             "source_file": source_file,
             "source_location": "file",
         }
@@ -708,8 +837,9 @@ def _parse_markdown(
 
 
 def _parse_text(
-    file_path: Path, filestem: str, source_file: str,
+    file_path: Path, source_file: str,
     add_node, add_edge, heading_slug, is_rst: bool = False,
+    index_root: Path | None = None,
 ) -> None:
     """Parse text/rst file for sections."""
     try:
@@ -745,11 +875,12 @@ def _parse_text(
         if is_header and title:
             slug = heading_slug(title)
             if slug:
-                node_id = f"{filestem}_{slug}"
+                node_id = _make_canonical_id(source_file, "header", slug, index_root)
                 add_node({
                     "id": node_id,
                     "label": title,
                     "file_type": "document",
+                    "entity_type": "header",
                     "source_file": source_file,
                     "source_location": f"line {i + 1}",
                 })
@@ -758,8 +889,9 @@ def _parse_text(
 
 
 def _parse_pdf(
-    file_path: Path, filestem: str, source_file: str,
+    file_path: Path, source_file: str,
     add_node, add_edge, heading_slug,
+    index_root: Path | None = None,
 ) -> None:
     """Parse PDF via pdftotext subprocess. Silent skip if unavailable."""
     import subprocess
@@ -788,22 +920,28 @@ def _parse_pdf(
         if len(stripped) < 80 and stripped[0].isupper() and not stripped.endswith("."):
             slug = heading_slug(stripped)
             if slug and len(slug) > 2:
-                node_id = f"{filestem}_{slug}"
+                node_id = _make_canonical_id(source_file, "header", slug, index_root)
                 add_node({
                     "id": node_id,
                     "label": stripped,
                     "file_type": "document",
+                    "entity_type": "header",
                     "source_file": source_file,
                     "source_location": f"line {i + 1}",
                 })
 
 
-def extract_semantic(files: list[Path], cache_dir: Path) -> dict:
+def extract_semantic(
+    files: list[Path], cache_dir: Path, index_root: Path | None = None,
+) -> dict:
     """Semantic extraction (requires LLM). Uses SHA256 cache.
 
     Args:
         files: List of file paths to extract semantics from.
         cache_dir: Directory for SHA256-keyed cache files.
+        index_root: Project root for canonical path-based IDs. LLM-generated
+            node IDs are rewritten to canonical form post-extraction — edges
+            are rewired through an old→new ID mapping.
 
     Returns:
         Dict with keys: nodes (list), edges (list), input_tokens (int), output_tokens (int).
@@ -907,14 +1045,30 @@ Rules:
             nodes = data.get("nodes", [])
             edges = data.get("edges", [])
 
-            # Ensure required fields
+            # Post-process: rewrite LLM-chosen node IDs into canonical form
+            # (file-scoped, collision-safe). Build old→new map, then rewire
+            # edges so they still point to the right nodes.
+            id_map: dict[str, str] = {}
             for node in nodes:
+                old_id = node.get("id", "")
+                label = node.get("label", old_id)
+                new_id = _make_canonical_id(
+                    str(file_path), "concept", label or old_id, index_root,
+                )
+                if old_id:
+                    id_map[old_id] = new_id
+                node["id"] = new_id
                 if "source_file" not in node or not node["source_file"]:
                     node["source_file"] = str(file_path)
                 if "file_type" not in node:
                     node["file_type"] = "document"
+                node.setdefault("entity_type", "concept")
 
             for edge in edges:
+                src = edge.get("source", "")
+                tgt = edge.get("target", "")
+                edge["source"] = id_map.get(src, _make_ref_id(src) if src else src)
+                edge["target"] = id_map.get(tgt, _make_ref_id(tgt) if tgt else tgt)
                 if "confidence" not in edge:
                     edge["confidence"] = "INFERRED"
                 if "confidence_score" not in edge:

@@ -177,7 +177,14 @@ def _llm_extract(text: str, source_file: str, provider: dict) -> dict:
 
 
 def _parse_llm_json(response: str, source_file: str) -> dict:
-    """Parse LLM JSON response, handling markdown code blocks."""
+    """Parse LLM JSON response, handling markdown code blocks.
+
+    Node IDs emitted by the LLM are rewritten to canonical form
+    ``{rel_path_slug}::concept::{slug}`` so ingest-generated nodes merge
+    cleanly with extract_semantic output.
+    """
+    from mindvault.extract import _make_canonical_id, _make_ref_id
+
     # Strip markdown code block if present
     cleaned = response.strip()
     if cleaned.startswith("```"):
@@ -194,15 +201,27 @@ def _parse_llm_json(response: str, source_file: str) -> dict:
         nodes = data.get("nodes", [])
         edges = data.get("edges", [])
 
-        # Ensure source_file is set on all nodes
+        # Rewrite LLM-chosen IDs into canonical form, then rewire edges.
+        id_map: dict[str, str] = {}
         for node in nodes:
+            old_id = node.get("id", "")
+            label = node.get("label", old_id)
+            new_id = _make_canonical_id(source_file, "concept", label or old_id)
+            if old_id:
+                id_map[old_id] = new_id
+            node["id"] = new_id
             if "source_file" not in node or not node["source_file"]:
                 node["source_file"] = source_file
             if "file_type" not in node:
                 node["file_type"] = "document"
+            node.setdefault("entity_type", "concept")
 
-        # Ensure required edge fields
+        # Ensure required edge fields + rewire IDs
         for edge in edges:
+            src = edge.get("source", "")
+            tgt = edge.get("target", "")
+            edge["source"] = id_map.get(src, _make_ref_id(src) if src else src)
+            edge["target"] = id_map.get(tgt, _make_ref_id(tgt) if tgt else tgt)
             if "confidence" not in edge:
                 edge["confidence"] = "INFERRED"
             if "confidence_score" not in edge:
@@ -454,9 +473,20 @@ def ingest_file(file_path: Path, output_dir: Path) -> dict:
     # Detect LLM
     provider = detect_llm()
     if provider["provider"] is None:
-        # No LLM available — still create wiki page from file metadata
+        # No LLM available — still create wiki page from file metadata.
+        # Use canonical file-level node ID so graph-side merges stay stable.
+        from mindvault.extract import _make_canonical_id
+        fallback_id = _make_canonical_id(str(file_path), "file", file_path.stem)
         wiki_result = _update_wiki_from_extraction(
-            {"nodes": [{"id": file_path.stem, "label": file_path.stem, "source_file": str(file_path)}], "edges": []},
+            {
+                "nodes": [{
+                    "id": fallback_id,
+                    "label": file_path.stem,
+                    "entity_type": "file",
+                    "source_file": str(file_path),
+                }],
+                "edges": [],
+            },
             file_path, output_dir,
         )
         return {

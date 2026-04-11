@@ -10,10 +10,6 @@ from mindvault.index import index_markdown, update_index
 from mindvault.detect import detect
 from mindvault.extract import extract_ast
 from mindvault.build import build_graph
-from mindvault.cluster import cluster, score_cohesion
-from mindvault.wiki import generate_wiki, _community_label
-from mindvault.export import export_json, export_html
-from mindvault.report import generate_report
 from mindvault.cache import get_dirty_files, update_cache
 
 
@@ -102,6 +98,11 @@ def _index_source_docs(source_dir: Path, doc_files: list[str], index_path: Path)
 def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
     """Incremental pipeline: only process changed files.
 
+    Extraction is restricted to dirty files, then merged with the existing
+    graph.json. Finalization (cluster → wiki → export → report) is delegated
+    to the shared ``_finalize_and_export`` helper in compile.py, so this
+    function and ``compile()`` stay consistent.
+
     Args:
         source_dir: Root directory of the project.
         output_dir: Directory for MindVault output.
@@ -120,6 +121,15 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
     if not graph_path.exists():
         return run(source_dir, output_dir)
 
+    # Option A: auto-migrate pre-0.4.0 graph.json to the canonical schema.
+    # Passes source_dir as index_root so migrated IDs match a fresh build.
+    from mindvault.migrate import migrate_graph_if_needed
+    migration = migrate_graph_if_needed(graph_path, index_root=source_dir)
+    if migration["status"] == "needs_rebuild":
+        # Option E fallback — user was told to rebuild. Fall through to full
+        # pipeline so the next run is immediately usable instead of erroring.
+        return run(source_dir, output_dir)
+
     # Detect files
     detection = detect(source_dir)
     code_files = [source_dir / f for f in detection["files"].get("code", [])]
@@ -133,16 +143,23 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
     if not dirty_files:
         return {"changed": 0}
 
-    # Extract AST for dirty code files, document structure for dirty doc files
+    # Extract AST for dirty code files, document structure for dirty doc files.
+    # source_dir is the canonical index_root so IDs match a full rebuild.
     from mindvault.extract import extract_document_structure
-    code_extraction = extract_ast(dirty_code) if dirty_code else {"nodes": [], "edges": []}
-    doc_extraction = extract_document_structure(dirty_docs) if dirty_docs else {"nodes": [], "edges": []}
+    code_extraction = (
+        extract_ast(dirty_code, index_root=source_dir)
+        if dirty_code else {"nodes": [], "edges": []}
+    )
+    doc_extraction = (
+        extract_document_structure(dirty_docs, index_root=source_dir)
+        if dirty_docs else {"nodes": [], "edges": []}
+    )
     extraction = {
         "nodes": code_extraction["nodes"] + doc_extraction["nodes"],
         "edges": code_extraction["edges"] + doc_extraction["edges"],
     }
 
-    # Load existing graph data
+    # Load existing graph data and merge new extraction with it
     existing_data = json.loads(graph_path.read_text(encoding="utf-8"))
     existing_nodes = {n["id"]: n for n in existing_data.get("nodes", [])}
     existing_links = existing_data.get("links", [])
@@ -156,12 +173,11 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
     for node in extraction["nodes"]:
         existing_nodes[node["id"]] = node
 
-    # For edges, remove old edges from dirty files
+    # For edges, remove old edges from dirty files, then add new ones
     kept_links = [
         link for link in existing_links
         if link.get("source_file") not in dirty_sources
     ]
-    # Add new edges
     for edge in extraction["edges"]:
         kept_links.append({
             "source": edge["source"],
@@ -180,21 +196,16 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
     }
     G = build_graph(merged_extraction)
 
-    # Re-cluster
-    communities = cluster(G)
-    cohesion = score_cohesion(G, communities)
-    labels = {}
-    for cid, members in communities.items():
-        labels[cid] = _community_label(G, members)
+    # Finalize: shared helper does cluster → wiki → export → report so that
+    # incremental and full builds stay in lock-step (Codex finding #9).
+    from mindvault.compile import _finalize_and_export
+    stats = _finalize_and_export(
+        G, source_dir, output_dir, detection,
+        incremental=True, write_report=False,
+    )
 
-    # Regenerate wiki
-    wiki_pages = generate_wiki(G, communities, labels, output_dir, cohesion=cohesion)
-
-    # Re-export
-    export_json(G, communities, output_dir / "graph.json")
-    export_html(G, communities, labels, output_dir / "graph.html")
-
-    # Update search index
+    # Update search index (incremental path manages this independently of
+    # wiki regeneration because only wiki/ changed)
     wiki_dir = output_dir / "wiki"
     index_path = output_dir / "search_index.json"
     index_docs = 0
@@ -207,9 +218,9 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
 
     return {
         "changed": len(dirty_files),
-        "nodes": G.number_of_nodes(),
-        "edges": G.number_of_edges(),
-        "communities": len(communities),
-        "wiki_pages": wiki_pages,
+        "nodes": stats["nodes"],
+        "edges": stats["edges"],
+        "communities": stats["communities"],
+        "wiki_pages": stats["wiki_pages"],
         "index_docs": index_docs,
     }

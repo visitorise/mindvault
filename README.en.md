@@ -686,6 +686,51 @@ mindvault lint
 
 ---
 
+## Changelog (v0.4.0)
+
+**Path-based canonical ID scheme** — node IDs are now derived from file paths.
+
+### What changed
+
+Pre-0.4.0, IDs were `{filestem}_{name}` — just the basename plus the entity name. This produced **collisions** whenever two files shared a basename across directories:
+
+```
+src/auth/utils.py::def validate() → utils_validate
+src/db/utils.py::def validate()   → utils_validate  ← same ID, nodes merge ❌
+```
+
+v0.4.0 uses `{rel_path_slug}::{kind}::{local_slug}`:
+
+```
+src/auth/utils.py::validate → src__auth__utils_py::function::validate
+src/db/utils.py::validate   → src__db__utils_py::function::validate   ✅
+```
+
+### Migration
+
+**Automatic**: if you already have a `graph.json`, the next `mindvault update` (or any incremental run) migrates it in place — takes 1–10 seconds, one-time, no user action required.
+
+**Fallback**: if automatic migration fails (missing `source_file` fields on most nodes, corrupted JSON), you'll see clear instructions:
+
+```bash
+rm -rf mindvault-out
+mindvault install
+```
+
+### Other improvements
+
+- **Pipeline centralization** — `compile()` and `run_incremental()` now share a `_finalize_and_export()` helper, eliminating ~50 LOC of duplicated cluster → wiki → export logic (Codex Finding #9)
+- **Test suite grew from 60 → 98** — covers canonical IDs, migration round-trips, Option E fallback, and all prior Codex findings
+- **New `entity_type` field** on every node: `file` / `module` / `class` / `function` / `method` / `header` / `block` / `concept`
+
+### Prior releases
+
+- **v0.3.2** — tests/ directory established, 60 regression tests
+- **v0.3.1** — 5 Codex patches (Unicode tags, frontmatter line offset, first_header_id, etc.)
+- **v0.3.0** — Obsidian native features (frontmatter, inline #tags, recursive walk, `.obsidian/` exclusion)
+
+---
+
 ## License
 
 MIT
@@ -693,5 +738,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.3.2 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.4.0 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
