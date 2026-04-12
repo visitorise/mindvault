@@ -79,9 +79,9 @@ elif command -v timeout >/dev/null 2>&1; then
     TIMEOUT_CMD="timeout 10"
 fi
 
-# 6) Run the query and head-limit the output so we never blow the hook
-# budget. Failures are swallowed so the user's prompt still goes through.
-RESULT=$($TIMEOUT_CMD mindvault query "$PROMPT" $QUERY_ARGS 2>/dev/null | head -60)
+# 6) Run the query with explicit token budget (5000) and head-limit output.
+# Budget caps wiki context; head caps total line count as a safety net.
+RESULT=$($TIMEOUT_CMD mindvault query "$PROMPT" --budget 5000 $QUERY_ARGS 2>/dev/null | head -20)
 
 # 7) Emit wrapped context so downstream prompts can see it.
 if [ -n "$RESULT" ]; then

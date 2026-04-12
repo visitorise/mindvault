@@ -106,12 +106,25 @@ def cmd_query(args) -> None:
 
     result = query(args.question, output_dir, mode=args.mode, budget=args.budget)
 
-    # Format output
+    # Format output — filter low-relevance search results to prevent
+    # noisy wiki page cascading (the "44K token" incident of 2026-04-12).
+    MIN_SEARCH_SCORE = 10.0
+
     print(f"\n=== Search Results (0 tokens) ===")
     if result["search_results"]:
-        for i, sr in enumerate(result["search_results"], 1):
-            print(f"  {i}. [{sr['title']}] (score: {sr['score']:.2f})")
+        shown = 0
+        skipped = 0
+        for sr in result["search_results"]:
+            if sr["score"] < MIN_SEARCH_SCORE:
+                skipped += 1
+                continue
+            shown += 1
+            print(f"  {shown}. [{sr['title']}] (score: {sr['score']:.2f})")
             print(f"     {sr['snippet'][:80]}")
+        if skipped:
+            print(f"  ({skipped} low-relevance results filtered, score < {MIN_SEARCH_SCORE})")
+        if shown == 0 and skipped == 0:
+            print("  (no results)")
     else:
         print("  (no results)")
 
@@ -125,7 +138,6 @@ def cmd_query(args) -> None:
         print("  (no matching nodes)")
 
     if gc["neighbors"]:
-        # Show a few neighbor relationships
         for edge in gc["edges"][:5]:
             src = edge.get("source", "?")
             tgt = edge.get("target", "?")
@@ -138,7 +150,6 @@ def cmd_query(args) -> None:
     wiki_len = len(result["wiki_context"])
     print(f"\n=== Wiki Context (est. ~{tokens} tokens) ===")
     if wiki_len > 0:
-        # Show first 500 chars
         preview = result["wiki_context"][:500]
         if wiki_len > 500:
             preview += f"\n... ({wiki_len - 500} more chars)"

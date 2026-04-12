@@ -690,6 +690,15 @@ mindvault lint
 
 ---
 
+## Changelog (v0.4.3)
+
+**Noise filtering + token budget**: the auto-context hook was injecting 44,000+ tokens on generic keywords like "update". Fixed with:
+
+- **Search score cutoff** — BM25 results below score 10 are filtered out, preventing low-relevance wiki pages from cascading into context
+- **`--budget 5000` token cap** — the hook now passes an explicit budget to `mindvault query`, capping wiki context at 5000 tokens
+- **`head -20` line cap** — hook output reduced from 60 → 20 lines as a safety net
+- **Embedded hook script sync** — the package-bundled `_PROMPT_HOOK_SCRIPT` now includes budget + head limits; next `mindvault install` auto-applies
+
 ## Changelog (v0.4.2)
 
 **Critical hotfix**: the `UserPromptSubmit` auto-context hook — the core of MindVault's "session continuity" story — had been **silently broken for months**. It exited 0 on every prompt and never injected a single byte of context.
@@ -767,5 +776,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.4.2 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.4.3 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

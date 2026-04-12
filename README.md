@@ -688,6 +688,15 @@ mindvault lint
 
 ---
 
+## 변경 내역 (v0.4.3)
+
+**노이즈 필터링 + 토큰 budget**: auto-context 훅이 generic 키워드("업데이트" 등)로 44,000+ 토큰을 주입하던 문제 수정.
+
+- **검색 score cutoff** — BM25 점수 10 미만인 저관련성 결과는 자동 필터링. 노이즈 wiki 페이지가 줄줄이 딸려오는 현상 제거
+- **`--budget 5000` 토큰 캡** — 훅이 `mindvault query`에 명시적 budget 전달. wiki context가 5000 토큰을 넘지 않음
+- **`head -20` 라인 캡** — hook 출력을 60줄 → 20줄로 제한 (safety net)
+- **`_PROMPT_HOOK_SCRIPT` 동기화** — 패키지 내장 hook 스크립트도 budget + head 제한 반영. 다음 `mindvault install`에서 자동 적용
+
 ## 변경 내역 (v0.4.2)
 
 **Critical hotfix**: `UserPromptSubmit` auto-context 훅이 **몇 달 동안 조용히 작동하지 않던** 버그 수정. 세션 연속성의 핵심 기능이 실제로는 매 프롬프트마다 즉시 exit 0 하고 아무 컨텍스트도 주입하지 않던 상태였습니다.
@@ -765,5 +774,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.4.2 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.4.3 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
