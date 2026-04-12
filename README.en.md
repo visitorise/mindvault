@@ -340,11 +340,13 @@ It automatically generates configuration files matching the detected tool upon r
 
 ---
 
-## Using with Obsidian
+## Viewing Output in Obsidian (Optional)
 
-MindVault is **Obsidian-ready out of the box**. No plugin, no configuration — MindVault already reads and writes Obsidian's wikilink syntax (`[[page]]`) natively. Three usage patterns are immediately available.
+> MindVault is a CLI tool built for **developers using AI coding agents** (Claude Code, Codex, Cursor, etc.). It works fully standalone — Obsidian is not required. The following section only applies if you already use Obsidian or want a nicer UI to browse the generated wiki pages.
 
-### Pattern A: Open MindVault output as an Obsidian vault
+**There is no Obsidian plugin.** MindVault just emits plain markdown; Obsidian can open that folder as a vault and give you backlinks / graph view / search for free. No additional dependencies.
+
+### Pattern A: Open MindVault output as an Obsidian vault (most common)
 
 Index your codebase first:
 
@@ -360,7 +362,9 @@ This creates per-community markdown wiki pages under `mindvault-out/wiki/`. **Op
 
 You get Andrej Karpathy's LLM Wiki pattern **auto-generated and served through Obsidian's UI**, with zero manual wiki maintenance.
 
-### Pattern B: Index an existing Obsidian vault
+### Pattern B: Index an existing Obsidian vault (requires Python + an AI coding agent)
+
+> This pattern is **not for plain Obsidian users**. It requires Python 3.10+, `pip install mindvault-ai`, and either Claude Code or a local LLM if you want semantic extraction. It's aimed at developers who already use AI coding agents and want a knowledge graph over their existing vault.
 
 If you already have an Obsidian vault, point MindVault at it:
 

@@ -338,11 +338,13 @@ tree-sitter 기반 AST 추출을 지원하는 13개 언어:
 
 ---
 
-## Obsidian과 함께 쓰기
+## Obsidian에서 결과물 보기 (선택 사항)
 
-MindVault는 **Obsidian과 즉시 호환**됩니다. 별도 플러그인이나 설정 없이 작동합니다 — MindVault가 Obsidian의 wikilink 문법(`[[page]]`)을 네이티브로 읽고 쓰기 때문입니다. 세 가지 사용 패턴이 있습니다.
+> MindVault는 **Claude Code / Codex / Cursor 등 AI 코딩 도구를 쓰는 개발자**를 위해 설계된 CLI 도구입니다. Obsidian 없이도 단독으로 완전히 작동합니다. 아래 내용은 이미 Obsidian을 쓰고 있거나, MindVault 결과물을 더 예쁘게 탐색하고 싶은 경우에만 해당됩니다.
 
-### 패턴 A: MindVault 출력물을 Obsidian vault로 열기
+**Obsidian 플러그인은 따로 없습니다.** MindVault는 그냥 마크다운을 출력할 뿐이고, Obsidian은 그 폴더를 vault로 열면 backlink / graph view / 검색을 자동으로 제공합니다. 별도 의존성이 추가되지 않습니다.
+
+### 패턴 A: MindVault 출력물을 Obsidian vault로 열기 (가장 흔한 사용)
 
 코드베이스를 먼저 인덱싱합니다:
 
@@ -358,7 +360,9 @@ mindvault ingest .
 
 Andrej Karpathy의 LLM Wiki 패턴을 **자동 생성 + Obsidian UI**로 즉시 사용하는 효과입니다.
 
-### 패턴 B: 기존 Obsidian vault 인덱싱
+### 패턴 B: 기존 Obsidian vault 인덱싱 (Python + Claude Code 필요)
+
+> 이 패턴은 순수 Obsidian 유저용이 **아닙니다**. Python 3.10+ 설치, `pip install mindvault-ai`, 그리고 시맨틱 추출을 쓰려면 Claude Code 또는 로컬 LLM이 필요합니다. AI 도구를 이미 쓰고 있는 개발자가 기존 vault의 지식 그래프를 만들고 싶을 때 적합합니다.
 
 이미 사용 중인 Obsidian vault가 있으면 그대로 인덱싱할 수 있습니다:
 
