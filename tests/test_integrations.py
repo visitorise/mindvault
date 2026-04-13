@@ -76,8 +76,36 @@ class TestDetection:
         names = {t["name"] for t in detected}
         assert "Claude Code" in names
 
-    def test_empty_directory_detects_nothing(self, tmp_path: Path):
+    def test_detects_claude_code_via_env_var(self, tmp_path: Path, monkeypatch):
+        """Claude Code detected via CLAUDECODE=1 even without CLAUDE.md."""
+        monkeypatch.setenv("CLAUDECODE", "1")
         detected = detect_ai_tools(tmp_path)
+        names = {t["name"] for t in detected}
+        assert "Claude Code" in names
+        # detected_file should be None for env-var detection
+        claude = next(t for t in detected if t["name"] == "Claude Code")
+        assert claude["detected_file"] is None
+
+    def test_detects_claude_code_via_global_config(self, tmp_path: Path, monkeypatch):
+        """Claude Code detected via ~/.claude/ directory."""
+        monkeypatch.delenv("CLAUDECODE", raising=False)
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        (fake_home / ".claude").mkdir()
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+        detected = detect_ai_tools(tmp_path / "project")
+        names = {t["name"] for t in detected}
+        assert "Claude Code" in names
+
+    def test_empty_directory_detects_nothing(self, tmp_path: Path, monkeypatch):
+        monkeypatch.delenv("CLAUDECODE", raising=False)
+        # Point home to a dir without .claude/
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+        project = tmp_path / "empty_project"
+        project.mkdir()
+        detected = detect_ai_tools(project)
         assert detected == []
 
 

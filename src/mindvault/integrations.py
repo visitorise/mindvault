@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
@@ -100,20 +101,42 @@ Steps:
 """
 
 
+def _detect_claude_code_runtime() -> bool:
+    """Detect Claude Code via environment variable set at runtime."""
+    return os.environ.get("CLAUDECODE") == "1"
+
+
+def _detect_claude_code_installed() -> bool:
+    """Detect Claude Code via global config directory (~/.claude/)."""
+    return Path.home().joinpath(".claude").is_dir()
+
+
 def detect_ai_tools(project_dir: Path) -> list[dict]:
     """Detect AI tools by checking for their rules/config files.
+
+    Claude Code is also detected via the CLAUDECODE env-var (set when
+    running inside a Claude Code session) and the ~/.claude/ global
+    config directory (present once Claude Code has been installed).
 
     Returns list of detected tool dicts, each with an added 'detected_file' key.
     """
     detected = []
     for tool in AI_TOOLS:
+        found = False
         for detect_file in tool["detect_files"]:
             path = project_dir / detect_file
             if path.exists():
                 result = dict(tool)
                 result["detected_file"] = detect_file
                 detected.append(result)
+                found = True
                 break
+        # Fallback: detect Claude Code via env-var or global config
+        if not found and tool["name"] == "Claude Code":
+            if _detect_claude_code_runtime() or _detect_claude_code_installed():
+                result = dict(tool)
+                result["detected_file"] = None
+                detected.append(result)
     return detected
 
 
