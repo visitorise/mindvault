@@ -1,6 +1,6 @@
 """MindVault — unified knowledge management: Search + Graph + Wiki."""
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
 
 def __getattr__(name: str):
