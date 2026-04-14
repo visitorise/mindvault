@@ -28,8 +28,12 @@ def _filter_noise_nodes(G: nx.DiGraph) -> set[str]:
     for nid in G.nodes():
         deg = G.degree(nid)
         label = G.nodes[nid].get("label", "").lower()
+        node_type = G.nodes[nid].get("type", "")
 
-        if deg == 0:
+        # Unresolved references are external symbols, not project knowledge
+        if "__unresolved__" in nid or node_type == "ref":
+            noise.add(nid)
+        elif deg == 0:
             noise.add(nid)
         elif deg == 1 and (len(label) <= 3 or label in generic_labels):
             noise.add(nid)

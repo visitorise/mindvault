@@ -11,13 +11,23 @@ from pathlib import Path
 import networkx as nx
 
 
+_RESERVED_SLUGS = {"index", "readme", "changelog", "license"}
+
+
 def _slugify(label: str) -> str:
-    """Convert label to slug: lowercase, spaces to hyphens, remove special chars."""
+    """Convert label to slug: lowercase, spaces to hyphens, remove special chars.
+
+    Reserved slugs (index, readme, etc.) get a '-community' suffix
+    to avoid collision with INDEX.md.
+    """
     slug = label.lower().strip()
     slug = re.sub(r"[^a-z0-9\s-]", "", slug)
     slug = re.sub(r"[\s]+", "-", slug)
     slug = re.sub(r"-+", "-", slug)
-    return slug.strip("-")
+    slug = slug.strip("-")
+    if slug in _RESERVED_SLUGS:
+        slug = f"{slug}-community"
+    return slug
 
 
 def _community_label(G: nx.DiGraph, members: list[str]) -> str:
