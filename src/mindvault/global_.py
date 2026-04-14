@@ -1,12 +1,195 @@
-"""Global pipeline: discover projects -> per-project pipeline -> merge -> unified output."""
+"""Global pipeline: discover projects -> per-project pipeline -> merge -> unified output.
+
+v0.8.1: Enhanced cross-project connections — shared dependencies, same stack,
+improved name matching with noise filtering.
+"""
 
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from mindvault.discover import discover_projects
+
+
+def _extract_dependencies(proj_path: Path) -> set[str]:
+    """Extract dependency names from project manifest files.
+
+    Supports: package.json, pubspec.yaml, pyproject.toml.
+    Returns a set of lowercased dependency names.
+    """
+    deps: set[str] = set()
+
+    # package.json (Node.js / React / Next.js / Expo)
+    pkg_json = proj_path / "package.json"
+    if pkg_json.exists():
+        try:
+            data = json.loads(pkg_json.read_text(encoding="utf-8", errors="ignore"))
+            for key in ("dependencies", "devDependencies"):
+                for dep_name in data.get(key, {}):
+                    deps.add(dep_name.lower())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # pubspec.yaml (Flutter/Dart)
+    pubspec = proj_path / "pubspec.yaml"
+    if pubspec.exists():
+        try:
+            import yaml
+            data = yaml.safe_load(pubspec.read_text(encoding="utf-8", errors="ignore"))
+            if isinstance(data, dict):
+                for key in ("dependencies", "dev_dependencies"):
+                    section = data.get(key, {})
+                    if isinstance(section, dict):
+                        for dep_name in section:
+                            deps.add(dep_name.lower())
+        except Exception:
+            pass
+
+    # pyproject.toml (Python)
+    pyproject = proj_path / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            text = pyproject.read_text(encoding="utf-8", errors="ignore")
+            # Simple regex extraction (avoid toml dependency)
+            import re
+            # Match lines like "networkx", "pytest>=8", etc. in dependencies array
+            for m in re.finditer(r'"([a-zA-Z0-9_-]+)', text):
+                dep_name = m.group(1).lower()
+                if len(dep_name) > 2:
+                    deps.add(dep_name)
+        except (OSError, UnicodeDecodeError):
+            pass
+
+    # Filter out noise deps (too common to be meaningful)
+    NOISE_DEPS = {
+        "typescript", "eslint", "prettier", "jest", "mocha",
+        "webpack", "babel", "postcss", "autoprefixer", "tailwindcss",
+        "react", "react-dom",  # too common in JS ecosystem
+        "flutter", "dart",  # implied by pubspec.yaml
+        "python", "pip", "setuptools", "wheel", "build", "twine",
+    }
+    return deps - NOISE_DEPS
+
+
+def _add_dependency_edges(
+    projects: list[dict],
+    all_nodes: list[dict],
+    all_edges: list[dict],
+) -> int:
+    """Add cross-project edges for shared dependencies.
+
+    Creates a virtual "dep::{name}" node for each shared dependency,
+    then links project root nodes to it. This creates a natural cluster
+    of projects sharing the same library.
+
+    Returns count of new edges added.
+    """
+    # Collect deps per project
+    proj_deps: dict[str, set[str]] = {}
+    for proj in projects:
+        deps = _extract_dependencies(proj["path"])
+        if deps:
+            proj_deps[proj["name"]] = deps
+
+    if len(proj_deps) < 2:
+        return 0
+
+    # Find deps shared by 2+ projects (but not ALL projects — those are noise)
+    dep_to_projects: dict[str, list[str]] = defaultdict(list)
+    for proj_name, deps in proj_deps.items():
+        for dep in deps:
+            dep_to_projects[dep].append(proj_name)
+
+    total_projects = len(proj_deps)
+    edge_count = 0
+
+    for dep, sharing_projects in dep_to_projects.items():
+        if len(sharing_projects) < 2:
+            continue
+        # Skip if ALL projects share it (too generic)
+        if len(sharing_projects) >= total_projects:
+            continue
+
+        # Create edges between projects that share this dependency
+        for i in range(len(sharing_projects)):
+            for j in range(i + 1, len(sharing_projects)):
+                p1, p2 = sharing_projects[i], sharing_projects[j]
+                # Find a representative node from each project (first module/file node)
+                n1 = _find_project_root_node(p1, all_nodes)
+                n2 = _find_project_root_node(p2, all_nodes)
+                if n1 and n2:
+                    all_edges.append({
+                        "source": n1,
+                        "target": n2,
+                        "relation": "shares_dependency",
+                        "confidence": "INFERRED",
+                        "confidence_score": 0.7,
+                        "weight": 0.6,
+                        "metadata": dep,
+                    })
+                    edge_count += 1
+
+    return edge_count
+
+
+def _add_stack_edges(
+    projects: list[dict],
+    all_nodes: list[dict],
+    all_edges: list[dict],
+) -> int:
+    """Add cross-project edges for projects on the same technology stack.
+
+    Returns count of new edges added.
+    """
+    stack_to_projects: dict[str, list[str]] = defaultdict(list)
+    for proj in projects:
+        stack = proj.get("type", "Unknown")
+        if stack != "Unknown":
+            stack_to_projects[stack].append(proj["name"])
+
+    edge_count = 0
+    for stack, proj_names in stack_to_projects.items():
+        if len(proj_names) < 2:
+            continue
+        for i in range(len(proj_names)):
+            for j in range(i + 1, len(proj_names)):
+                n1 = _find_project_root_node(proj_names[i], all_nodes)
+                n2 = _find_project_root_node(proj_names[j], all_nodes)
+                if n1 and n2:
+                    all_edges.append({
+                        "source": n1,
+                        "target": n2,
+                        "relation": "same_stack",
+                        "confidence": "INFERRED",
+                        "confidence_score": 0.8,
+                        "weight": 0.7,
+                        "metadata": stack,
+                    })
+                    edge_count += 1
+
+    return edge_count
+
+
+def _find_project_root_node(proj_name: str, all_nodes: list[dict]) -> str | None:
+    """Find the best representative node for a project.
+
+    Prefers: module-level nodes > file-level nodes > any node.
+    """
+    candidates = [n for n in all_nodes if n.get("project") == proj_name]
+    if not candidates:
+        return None
+
+    # Prefer module/file-level nodes (they represent the project better)
+    for n in candidates:
+        ntype = n.get("type", "")
+        if ntype in ("module", "file"):
+            return n["id"]
+
+    # Fallback: first node
+    return candidates[0]["id"]
 
 
 def run_global(
@@ -99,10 +282,14 @@ def run_global(
             }
         )
 
-    # 3. Add cross-project edges (shares_name_with)
-    # Group nodes by their base name (without project prefix)
-    from collections import defaultdict
+    # 3. Add cross-project edges
+    # 3a. Shared dependencies (from manifest files)
+    dep_edges = _add_dependency_edges(projects, all_nodes, all_edges)
 
+    # 3b. Same technology stack
+    stack_edges = _add_stack_edges(projects, all_nodes, all_edges)
+
+    # 3c. Shared names (improved from original — stricter filtering)
     name_to_nodes: dict[str, list[str]] = defaultdict(list)
     for node in all_nodes:
         # Extract base name: project/file_entity -> entity part
@@ -240,7 +427,7 @@ def run_global(
         "projects": len(projects),
         "total_nodes": G.number_of_nodes(),
         "total_edges": G.number_of_edges(),
-        "cross_project_edges": cross_edges,
+        "cross_project_edges": cross_edges + dep_edges + stack_edges,
         "wiki_pages": wiki_pages,
         "index_docs": index_docs,
     }
