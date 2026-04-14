@@ -13,7 +13,7 @@ MINDVAULT_HOOK_VERSION = 4
 
 _PROMPT_HOOK_SCRIPT_TEMPLATE = '''#!/bin/bash
 # MindVault auto-context hook
-# MINDVAULT_HOOK_VERSION=3
+# MINDVAULT_HOOK_VERSION=4
 #
 # Reads stdin JSON (Claude Code UserPromptSubmit spec) and injects
 # `mindvault query` results into the user prompt as `<mindvault-context>`.
@@ -233,11 +233,10 @@ def install_prompt_hook() -> bool:
 
 _LORE_HOOK_SCRIPT_TEMPLATE = '''#!/bin/bash
 # MindVault Lore detection hook (PostToolUse)
-# MINDVAULT_LORE_HOOK_VERSION=1
+# MINDVAULT_LORE_HOOK_VERSION=2
 #
-# Detects lore-worthy events (rollbacks, test failures, etc.) from
-# Bash tool output and injects a one-time suggestion into the context.
-# Does NOT auto-record — suggests to the AI which then asks the user.
+# Detects lore-worthy events from Bash tool output (stdout + stderr + command)
+# and either auto-records, suggests, or shows a one-time onboarding notice.
 
 # Read stdin JSON (Claude Code PostToolUse spec)
 INPUT=$(cat)
@@ -245,13 +244,22 @@ if [ -z "$INPUT" ]; then
     exit 0
 fi
 
-# Extract tool name and output
-TOOL_NAME=$(echo "$INPUT" | python3 -c "
+# Extract tool name, stdout, stderr, and command from payload
+eval $(echo "$INPUT" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
-    print(d.get('tool_name', d.get('toolName', '')))
-except: pass
+    tool = d.get('tool_name', d.get('toolName', ''))
+    stdout = d.get('stdout', d.get('output', ''))[:2000]
+    stderr = d.get('stderr', '')[:1000]
+    cmd = d.get('command', d.get('input', ''))[:500]
+    # Shell-safe export via repr
+    print(f'TOOL_NAME={repr(tool)}')
+    print(f'STDOUT={repr(stdout)}')
+    print(f'STDERR={repr(stderr)}')
+    print(f'CMD={repr(cmd)}')
+except:
+    print('TOOL_NAME=\"\"')
 " 2>/dev/null)
 
 # Only process Bash tool calls
@@ -259,64 +267,69 @@ if [ "$TOOL_NAME" != "Bash" ]; then
     exit 0
 fi
 
-# Extract stdout from the tool result
-STDOUT=$(echo "$INPUT" | python3 -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-    out = d.get('stdout', d.get('output', ''))
-    print(out[:2000])
-except: pass
-" 2>/dev/null)
-
-if [ -z "$STDOUT" ]; then
+# Combine stdout + stderr + command for comprehensive pattern matching
+COMBINED="$STDOUT $STDERR $CMD"
+if [ -z "$COMBINED" ] || [ ${#COMBINED} -lt 5 ]; then
     exit 0
 fi
 
-# Check if lore notice was already shown this install
-NOTICE_FLAG="$HOME/.mindvault/.lore-noticed"
 LORE_CONFIG="$HOME/.mindvault/lore-config.json"
 
-# If lore is already configured, use configured behavior
-if [ -f "$LORE_CONFIG" ]; then
-    # Lore is configured — detect patterns and suggest based on config
+# ---- Pattern detection (all 5 patterns) ----
+detect_pattern() {
     DETECTED=""
     LORE_TYPE=""
     SUGGESTED_TITLE=""
+    CONTEXT_SNIPPET=""
 
-    # Pattern: git revert/reset
-    if echo "$STDOUT" | grep -qiE "Revert|revert.*commit|reset.*hard|HEAD is now at"; then
+    # 1. rollback — git revert/reset
+    if echo "$COMBINED" | grep -qiE "Revert|revert.*commit|reset.*hard|HEAD is now at"; then
         DETECTED="rollback"
         LORE_TYPE="rollback"
         SUGGESTED_TITLE="Code rollback detected"
-    fi
-
-    # Pattern: repeated test failure
-    if echo "$STDOUT" | grep -qiE "FAILED|ERRORS|tests? failed|AssertionError|pytest.*failed"; then
+        CONTEXT_SNIPPET=$(echo "$STDOUT" | grep -iE "Revert|reset|HEAD" | head -3)
+    # 2. test_failure — test failures
+    elif echo "$COMBINED" | grep -qiE "FAILED|ERRORS|tests? failed|AssertionError|pytest.*failed|jest.*fail|error TS"; then
         DETECTED="test_failure"
         LORE_TYPE="failure"
         SUGGESTED_TITLE="Test failure detected"
-    fi
-
-    # Pattern: dependency change
-    if echo "$STDOUT" | grep -qiE "npm install|pip install|added [0-9]+ package|Successfully installed"; then
+        CONTEXT_SNIPPET=$(echo "$COMBINED" | grep -iE "FAILED|Error|assert" | head -3)
+    # 3. dependency — package changes
+    elif echo "$COMBINED" | grep -qiE "npm install|pip install|added [0-9]+ package|Successfully installed|removing.*package"; then
         DETECTED="dependency"
         LORE_TYPE="decision"
         SUGGESTED_TITLE="Dependency change"
+        CONTEXT_SNIPPET=$(echo "$COMBINED" | grep -iE "install|added|remov" | head -3)
+    # 4. architecture — major file restructure
+    elif echo "$CMD" | grep -qiE "mv .*src/|mkdir -p .*src/|rename|restructur"; then
+        DETECTED="architecture"
+        LORE_TYPE="decision"
+        SUGGESTED_TITLE="Architecture change detected"
+        CONTEXT_SNIPPET="$CMD"
+    # 5. build_fix — build failure then fix
+    elif echo "$COMBINED" | grep -qiE "build failed|compilation error|Build error|error\\[E|error:.*cannot find"; then
+        DETECTED="build_fix"
+        LORE_TYPE="failure"
+        SUGGESTED_TITLE="Build failure detected"
+        CONTEXT_SNIPPET=$(echo "$COMBINED" | grep -iE "error|failed|Build" | head -3)
     fi
+}
 
-    if [ -z "$DETECTED" ]; then
-        exit 0
-    fi
+detect_pattern
 
-    # Check config for this pattern's action
+if [ -z "$DETECTED" ]; then
+    exit 0
+fi
+
+# ---- Configured mode: use user settings ----
+if [ -f "$LORE_CONFIG" ]; then
     ACTION=$(python3 -c "
-import json, sys
+import json
 try:
-    with open('$LORE_CONFIG') as f:
+    with open('"'"'$LORE_CONFIG'"'"') as f:
         cfg = json.load(f)
-    print(cfg.get('patterns', {}).get('$DETECTED', 'ask'))
-except: print('ask')
+    print(cfg.get('"'"'patterns'"'"', {}).get('"'"'$DETECTED'"'"', '"'"'ask'"'"'))
+except: print('"'"'ask'"'"')
 " 2>/dev/null)
 
     if [ "$ACTION" = "ignore" ]; then
@@ -329,16 +342,24 @@ except: print('ask')
     fi
 
     if [ "$ACTION" = "auto" ]; then
-        # Auto-record with basic info
-        $MINDVAULT lore record --title "$SUGGESTED_TITLE" --type "$LORE_TYPE" --context "Auto-detected from tool output" --outcome "Pending user review" 2>/dev/null
+        # Auto-record with actual context from the output
+        SAFE_CONTEXT=$(echo "$CONTEXT_SNIPPET" | head -3 | tr '"' "'" | tr '\n' ' ')
+        SAFE_CMD=$(echo "$CMD" | head -1 | tr '"' "'")
+        $MINDVAULT lore record \
+            --title "$SUGGESTED_TITLE" \
+            --type "$LORE_TYPE" \
+            --context "Command: $SAFE_CMD | Output: $SAFE_CONTEXT" \
+            --outcome "Auto-recorded. Review and add resolution details." 2>/dev/null
         echo "<lore-auto-recorded>"
         echo "Lore auto-recorded: $SUGGESTED_TITLE (type: $LORE_TYPE)"
+        echo "Context: $SAFE_CONTEXT"
         echo "Review with: mindvault lore list"
         echo "</lore-auto-recorded>"
     else
-        # Ask mode — suggest to AI
+        # Ask mode — suggest to AI with actual context
         echo "<lore-suggestion>"
         echo "Detected: $SUGGESTED_TITLE"
+        echo "Context: $CONTEXT_SNIPPET"
         echo "Suggested command: mindvault lore record --title \"...\" --type $LORE_TYPE --context \"...\" --outcome \"...\""
         echo "Ask the user if they want to record this decision/failure in Lore."
         echo "</lore-suggestion>"
@@ -347,38 +368,24 @@ except: print('ask')
     exit 0
 fi
 
-# Lore NOT configured yet — check if we should show one-time notice
+# ---- Not configured: lazy onboarding (one-time notice) ----
+# Only write .lore-noticed AFTER user runs setup, not here
+NOTICE_FLAG="$HOME/.mindvault/.lore-noticed"
 if [ -f "$NOTICE_FLAG" ]; then
-    exit 0  # Already shown once
-fi
-
-# Detect any lore-worthy pattern to trigger the notice
-SHOULD_NOTICE=false
-if echo "$STDOUT" | grep -qiE "Revert|revert.*commit|reset.*hard|HEAD is now at"; then
-    SHOULD_NOTICE=true
-fi
-if echo "$STDOUT" | grep -qiE "FAILED|ERRORS|tests? failed|AssertionError|pytest.*failed"; then
-    SHOULD_NOTICE=true
-fi
-
-if [ "$SHOULD_NOTICE" = "false" ]; then
     exit 0
 fi
 
-# Show one-time lore notice
-mkdir -p "$HOME/.mindvault"
-touch "$NOTICE_FLAG"
-
+# Show notice but do NOT write the flag yet — user must opt in via setup
 echo "<lore-notice>"
-echo "MindVault detected a significant event (rollback or test failure)."
+echo "MindVault detected a significant event: $SUGGESTED_TITLE"
 echo "MindVault Lore can automatically track decisions, failures, and learnings"
 echo "so your AI remembers WHY things changed — not just WHAT changed."
 echo ""
 echo "Currently: manual only (mindvault lore record --title '...')"
 echo "Setup automation: mindvault lore setup"
 echo ""
-echo "Tell the user about this feature and ask if they want to set it up."
-echo "This notice appears only once."
+echo "Tell the user about this feature and ask if they want to set it up now."
+echo "If the user declines, run: touch $NOTICE_FLAG"
 echo "</lore-notice>"
 
 exit 0
@@ -407,7 +414,7 @@ def install_lore_hook() -> bool:
     if hook_path.exists():
         try:
             existing = hook_path.read_text(encoding="utf-8")
-            if "MINDVAULT_LORE_HOOK_VERSION=1" in existing and mindvault_bin in existing:
+            if "MINDVAULT_LORE_HOOK_VERSION=2" in existing and mindvault_bin in existing:
                 needs_write = False
         except (OSError, UnicodeDecodeError):
             pass

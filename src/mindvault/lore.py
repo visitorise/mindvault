@@ -11,7 +11,9 @@ Storage: mindvault-out/lore/YYYY-MM-DD-slug.md
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -23,6 +25,30 @@ from mindvault.index import (
     _compute_idf,
     load_index,
 )
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Write JSON atomically via temp file + rename (Codex finding #9)."""
+    path = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _escape_yaml_value(value: str) -> str:
+    """Escape a string value for safe YAML frontmatter (Codex finding #8)."""
+    if any(c in value for c in (":", "[", "]", "{", "}", "#", "&", "*", "!", "|", ">", "'", '"', "%", "@", "`", "---", "\n")):
+        escaped = value.replace('"', '\\"').replace("\n", " ")
+        return f'"{escaped}"'
+    return value
 
 
 # Valid lore entry types
@@ -74,9 +100,10 @@ def record(
         filepath = lore_dir / f"{date_str}-{slug}-{counter}.md"
         counter += 1
 
-    tags_str = ", ".join(tags) if tags else ""
+    tags_str = ", ".join(_escape_yaml_value(t) for t in tags) if tags else ""
+    safe_title = _escape_yaml_value(title)
     content = f"""---
-title: {title}
+title: {safe_title}
 type: {lore_type}
 date: {date_str}
 tags: [{tags_str}]
@@ -175,10 +202,14 @@ def index_all_lore(output_dir: Path) -> int:
     docs = index_data.get("docs", {})
     count = 0
 
+    # Track existing lore files
+    current_lore_keys: set[str] = set()
+
     for md_file in lore_dir.glob("*.md"):
         content = md_file.read_text(encoding="utf-8")
         content_hash = _hash_content(content)
         key = f"lore/{md_file.name}"
+        current_lore_keys.add(key)
 
         if key in docs and docs[key].get("hash") == content_hash:
             continue
@@ -198,14 +229,17 @@ def index_all_lore(output_dir: Path) -> int:
         }
         count += 1
 
+    # Remove deleted lore entries from index (Codex finding #3)
+    deleted_lore = [k for k in docs if k.startswith("lore/") and k not in current_lore_keys]
+    for k in deleted_lore:
+        del docs[k]
+        count += 1
+
     if count > 0:
         index_data["docs"] = docs
         index_data["doc_count"] = len(docs)
         index_data["idf"] = _compute_idf(docs)
-        index_path.write_text(
-            json.dumps(index_data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _atomic_write_json(index_path, index_data)
 
     return count
 
@@ -235,10 +269,7 @@ def _index_lore_entry(filepath: Path, output_dir: Path, index_path: Path) -> Non
     index_data["docs"] = docs
     index_data["doc_count"] = len(docs)
     index_data["idf"] = _compute_idf(docs)
-    index_path.write_text(
-        json.dumps(index_data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    _atomic_write_json(index_path, index_data)
 
 
 # Lore detection patterns with descriptions and defaults
@@ -339,6 +370,10 @@ def setup_lore(interactive: bool = True) -> dict:
     # Install the lore hook
     from mindvault.hooks import install_lore_hook
     install_lore_hook()
+
+    # Mark as noticed so the one-time notice doesn't show again (Codex finding #6)
+    notice_flag = config_dir / ".lore-noticed"
+    notice_flag.touch()
 
     print("✓ Lore configuration saved")
     print("✓ Lore detection hook installed")

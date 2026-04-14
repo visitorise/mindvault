@@ -326,12 +326,17 @@ def query(question: str, output_dir: Path, mode: str = "bfs", budget: int = 2000
     char_limit = wiki_token_budget * 4
 
     if wiki_dir.exists():
-        # Collect wiki pages from search results
+        # Collect wiki pages from search results (including lore entries)
         wiki_paths = []
         for sr in search_results:
             wp = wiki_dir / sr["path"]
             if wp.exists():
                 wiki_paths.append(wp)
+            # Also check lore entries (stored under lore/ prefix in index)
+            if sr["path"].startswith("lore/"):
+                lore_path = output_dir / sr["path"]
+                if lore_path.exists():
+                    wiki_paths.append(lore_path)
 
         # Also look for wiki pages matching graph communities
         if not wiki_paths:

@@ -103,7 +103,8 @@ def _index_source_docs(source_dir: Path, doc_files: list[str], index_path: Path)
     index_data["docs"] = docs
     index_data["doc_count"] = len(docs)
     index_data["idf"] = _compute_idf(docs)
-    index_path.write_text(json.dumps(index_data, ensure_ascii=False, indent=2), encoding="utf-8")
+    from mindvault.lore import _atomic_write_json
+    _atomic_write_json(index_path, index_data)
 
 
 def _flatten_json(obj, prefix: str = "") -> list[str]:
@@ -209,7 +210,8 @@ def _index_data_files(source_dir: Path, data_files: list[str], index_path: Path)
     index_data["docs"] = docs
     index_data["doc_count"] = len(docs)
     index_data["idf"] = _compute_idf(docs)
-    index_path.write_text(json.dumps(index_data, ensure_ascii=False, indent=2), encoding="utf-8")
+    from mindvault.lore import _atomic_write_json
+    _atomic_write_json(index_path, index_data)
 
 
 def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
@@ -331,6 +333,22 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
     index_docs = 0
     if wiki_dir.exists():
         index_docs = update_index(wiki_dir, index_path)
+
+    # Also index source documents, data files, and lore entries
+    # (mirrors the full pipeline in run() — Codex finding #2)
+    doc_files_list = detection["files"].get("document", [])
+    if doc_files_list:
+        _index_source_docs(source_dir, doc_files_list, index_path)
+        index_docs += len(doc_files_list)
+
+    data_files_list = detection["files"].get("data", [])
+    if data_files_list:
+        _index_data_files(source_dir, data_files_list, index_path)
+        index_docs += len(data_files_list)
+
+    from mindvault.lore import index_all_lore
+    lore_count = index_all_lore(output_dir)
+    index_docs += lore_count
 
     # Update cache for processed files
     for f in dirty_files:
