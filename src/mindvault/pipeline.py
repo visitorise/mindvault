@@ -11,14 +11,18 @@ from mindvault.detect import detect
 from mindvault.extract import extract_ast
 from mindvault.build import build_graph
 from mindvault.cache import get_dirty_files, update_cache
+from mindvault.progress import Progress
 
 
-def run(source_dir: Path, output_dir: Path = None, **kwargs) -> dict:
+def run(
+    source_dir: Path, output_dir: Path = None, verbose: bool = False, **kwargs
+) -> dict:
     """Full pipeline orchestrator.
 
     Args:
         source_dir: Root directory of the project.
         output_dir: Directory for MindVault output (default: source_dir/mindvault-out).
+        verbose: If True, show progress messages. Default False.
         **kwargs: Additional options passed to sub-steps.
 
     Returns:
@@ -29,30 +33,43 @@ def run(source_dir: Path, output_dir: Path = None, **kwargs) -> dict:
         output_dir = source_dir / "mindvault-out"
     output_dir = Path(output_dir)
 
-    # Run compile (detect -> extract -> graph -> cluster -> wiki -> export)
-    result = compile(source_dir, output_dir, **kwargs)
+    progress = Progress(total_steps=5, enabled=verbose)
 
-    # Detect again to get doc files (compile doesn't expose detection)
+    # Step 1: Detect files
+    progress.step("Detecting files")
     detection = detect(source_dir)
+    code_count = len(detection["files"].get("code", []))
+    doc_count = len(detection["files"].get("document", []))
+    progress.done(f"Found {code_count} code, {doc_count} doc files")
 
-    # Build search index on wiki pages + source documents
+    # Step 2: Compile (detect -> extract -> graph -> cluster -> wiki -> export)
+    progress.step("Compiling graph")
+    result = compile(source_dir, output_dir, **kwargs)
+    progress.done(f"{result['nodes']} nodes, {result['edges']} edges")
+
+    # Step 3: Index wiki pages
+    progress.step("Indexing wiki")
     wiki_dir = output_dir / "wiki"
     index_path = output_dir / "search_index.json"
     index_docs = 0
     if wiki_dir.exists():
         index_docs = index_markdown(wiki_dir, index_path)
+    progress.done(f"{result['wiki_pages']} pages")
 
-    # Also index source .md documents for better search coverage
+    # Step 4: Index source documents
+    progress.step("Indexing source docs")
     doc_files = detection["files"].get("document", [])
     if doc_files:
         _index_source_docs(source_dir, doc_files, index_path)
         index_docs += len(doc_files)
 
-    # Index data files (.json, .yaml, .yml) for search coverage
+    # Step 5: Index data files for search coverage
+    progress.step("Indexing data files")
     data_files = detection["files"].get("data", [])
     if data_files:
         _index_data_files(source_dir, data_files, index_path)
         index_docs += len(data_files)
+    progress.done(f"Indexed {index_docs} documents")
 
     # Index lore entries (decisions/failures/learnings)
     from mindvault.lore import index_all_lore
@@ -63,13 +80,22 @@ def run(source_dir: Path, output_dir: Path = None, **kwargs) -> dict:
     return result
 
 
-def _index_source_docs(source_dir: Path, doc_files: list[str], index_path: Path) -> None:
+def _index_source_docs(
+    source_dir: Path, doc_files: list[str], index_path: Path
+) -> None:
     """Append source documents (.md, .txt, .rst, .docx, .xlsx, .pptx) to the search index.
 
     For binary Office formats, delegates to mindvault.ingest._extract_text_from_file
     which uses python-docx / openpyxl / python-pptx to pull plain text.
     """
-    from mindvault.index import load_index, _tokenize, _extract_title, _extract_headings, _hash_content, _compute_idf
+    from mindvault.index import (
+        load_index,
+        _tokenize,
+        _extract_title,
+        _extract_headings,
+        _hash_content,
+        _compute_idf,
+    )
     from mindvault.detect import BINARY_DOCUMENT_EXTS
     from mindvault.ingest import _extract_text_from_file
     import json
@@ -138,7 +164,9 @@ def _flatten_json(obj, prefix: str = "") -> list[str]:
     return fragments
 
 
-def _index_data_files(source_dir: Path, data_files: list[str], index_path: Path) -> None:
+def _index_data_files(
+    source_dir: Path, data_files: list[str], index_path: Path
+) -> None:
     """Index data files (.json, .yaml, .yml) into the search index.
 
     Flattens structured data into searchable text so that metadata,
@@ -182,6 +210,7 @@ def _index_data_files(source_dir: Path, data_files: list[str], index_path: Path)
         elif ext in (".yaml", ".yml"):
             try:
                 import yaml
+
                 obj = yaml.safe_load(raw)
                 if isinstance(obj, (dict, list)):
                     text_fragments = _flatten_json(obj)
@@ -214,7 +243,9 @@ def _index_data_files(source_dir: Path, data_files: list[str], index_path: Path)
     _atomic_write_json(index_path, index_data)
 
 
-def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
+def run_incremental(
+    source_dir: Path, output_dir: Path = None, verbose: bool = False
+) -> dict:
     """Incremental pipeline: only process changed files.
 
     Extraction is restricted to dirty files, then merged with the existing
@@ -225,6 +256,7 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
     Args:
         source_dir: Root directory of the project.
         output_dir: Directory for MindVault output.
+        verbose: If True, show progress messages. Default False.
 
     Returns:
         Dict with stats: {changed, nodes, edges, communities, wiki_pages, index_docs}
@@ -235,99 +267,112 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
         output_dir = source_dir / "mindvault-out"
     output_dir = Path(output_dir)
 
+    progress = Progress(total_steps=4, enabled=verbose)
+
     # If output doesn't exist yet, run full pipeline
     graph_path = output_dir / "graph.json"
     if not graph_path.exists():
-        return run(source_dir, output_dir)
+        return run(source_dir, output_dir, verbose=verbose)
 
     # Option A: auto-migrate pre-0.4.0 graph.json to the canonical schema.
-    # Passes source_dir as index_root so migrated IDs match a fresh build.
+    # Passes source_dir as index_root so migrated IDs match a full build.
     from mindvault.migrate import migrate_graph_if_needed
+
     migration = migrate_graph_if_needed(graph_path, index_root=source_dir)
     if migration["status"] == "needs_rebuild":
         # Option E fallback — user was told to rebuild. Fall through to full
         # pipeline so the next run is immediately usable instead of erroring.
-        return run(source_dir, output_dir)
+        return run(source_dir, output_dir, verbose=verbose)
 
-    # Detect files
+    # Step 1: Detect changes
+    progress.step("Detecting changes")
     detection = detect(source_dir)
     code_files = [source_dir / f for f in detection["files"].get("code", [])]
     doc_files = [source_dir / f for f in detection["files"].get("document", [])]
     data_files = [source_dir / f for f in detection["files"].get("data", [])]
 
-    # Check which files changed (code + documents + data)
     dirty_code = get_dirty_files(code_files, output_dir)
     dirty_docs = get_dirty_files(doc_files, output_dir)
     dirty_data = get_dirty_files(data_files, output_dir)
     dirty_files = dirty_code + dirty_docs + dirty_data
 
     if not dirty_files:
+        progress.done("No changes detected")
         return {"changed": 0}
+    progress.done(f"{len(dirty_files)} files changed")
 
-    # Extract AST for dirty code files, document structure for dirty doc/data files.
-    # source_dir is the canonical index_root so IDs match a full rebuild.
+    # Step 2: Extract & build
+    progress.step("Extracting & building")
     from mindvault.extract import extract_document_structure
+
     code_extraction = (
         extract_ast(dirty_code, index_root=source_dir)
-        if dirty_code else {"nodes": [], "edges": []}
+        if dirty_code
+        else {"nodes": [], "edges": []}
     )
     dirty_docs_and_data = dirty_docs + dirty_data
     doc_extraction = (
         extract_document_structure(dirty_docs_and_data, index_root=source_dir)
-        if dirty_docs_and_data else {"nodes": [], "edges": []}
+        if dirty_docs_and_data
+        else {"nodes": [], "edges": []}
     )
     extraction = {
         "nodes": code_extraction["nodes"] + doc_extraction["nodes"],
         "edges": code_extraction["edges"] + doc_extraction["edges"],
     }
 
-    # Load existing graph data and merge new extraction with it
     existing_data = json.loads(graph_path.read_text(encoding="utf-8"))
     existing_nodes = {n["id"]: n for n in existing_data.get("nodes", [])}
     existing_links = existing_data.get("links", [])
 
-    # Remove stale nodes from dirty files, then add new/updated ones
     dirty_sources = {str(f) for f in dirty_files}
     existing_nodes = {
-        nid: n for nid, n in existing_nodes.items()
+        nid: n
+        for nid, n in existing_nodes.items()
         if n.get("source_file") not in dirty_sources
     }
     for node in extraction["nodes"]:
         existing_nodes[node["id"]] = node
 
-    # For edges, remove old edges from dirty files, then add new ones
     kept_links = [
-        link for link in existing_links
-        if link.get("source_file") not in dirty_sources
+        link for link in existing_links if link.get("source_file") not in dirty_sources
     ]
     for edge in extraction["edges"]:
-        kept_links.append({
-            "source": edge["source"],
-            "target": edge["target"],
-            "relation": edge.get("relation", ""),
-            "confidence": edge.get("confidence", ""),
-            "confidence_score": edge.get("confidence_score", 1.0),
-            "source_file": edge.get("source_file", ""),
-            "weight": edge.get("weight", 1.0),
-        })
+        kept_links.append(
+            {
+                "source": edge["source"],
+                "target": edge["target"],
+                "relation": edge.get("relation", ""),
+                "confidence": edge.get("confidence", ""),
+                "confidence_score": edge.get("confidence_score", 1.0),
+                "source_file": edge.get("source_file", ""),
+                "weight": edge.get("weight", 1.0),
+            }
+        )
 
-    # Rebuild graph from merged data
     merged_extraction = {
         "nodes": list(existing_nodes.values()),
         "edges": kept_links,
     }
     G = build_graph(merged_extraction)
+    progress.done(f"{G.number_of_nodes()} nodes")
 
-    # Finalize: shared helper does cluster → wiki → export → report so that
-    # incremental and full builds stay in lock-step (Codex finding #9).
+    # Step 3: Update wiki
+    progress.step("Updating wiki")
     from mindvault.compile import _finalize_and_export
-    stats = _finalize_and_export(
-        G, source_dir, output_dir, detection,
-        incremental=True, write_report=False,
-    )
 
-    # Update search index (incremental path manages this independently of
-    # wiki regeneration because only wiki/ changed)
+    stats = _finalize_and_export(
+        G,
+        source_dir,
+        output_dir,
+        detection,
+        incremental=True,
+        write_report=False,
+    )
+    progress.done(f"{stats['wiki_pages']} pages")
+
+    # Step 4: Update index
+    progress.step("Updating index")
     wiki_dir = output_dir / "wiki"
     index_path = output_dir / "search_index.json"
     index_docs = 0
@@ -353,6 +398,7 @@ def run_incremental(source_dir: Path, output_dir: Path = None) -> dict:
     # Update cache for processed files
     for f in dirty_files:
         update_cache(f, output_dir)
+    progress.done(f"{index_docs} documents")
 
     return {
         "changed": len(dirty_files),

@@ -14,7 +14,11 @@ from mindvault import __version__
 def cmd_install(args) -> None:
     """mindvault install — AI tool detection + integration + skill registration + git hook."""
     from mindvault.hooks import install_git_hook
-    from mindvault.integrations import detect_ai_tools, install_all_integrations, AI_TOOLS
+    from mindvault.integrations import (
+        detect_ai_tools,
+        install_all_integrations,
+        AI_TOOLS,
+    )
 
     project_root = Path(args.path).resolve()
 
@@ -53,7 +57,9 @@ def cmd_install(args) -> None:
     if skill_src.exists():
         skill_dst_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(skill_src, skill_dst_dir / "SKILL.md")
-        print(f"  \u2713 Claude Code \u2014 Skill registered (~/.claude/skills/mindvault/)")
+        print(
+            f"  \u2713 Claude Code \u2014 Skill registered (~/.claude/skills/mindvault/)"
+        )
     else:
         print("  \u2717 Skill: SKILL.md not found (skip)")
 
@@ -69,8 +75,11 @@ def cmd_install(args) -> None:
 
     # 5. Install auto-context prompt hook
     from mindvault.hooks import install_prompt_hook
+
     if install_prompt_hook():
-        print(f"  \u2713 Auto-context hook \u2014 installed (AI auto-queries MindVault)")
+        print(
+            f"  \u2713 Auto-context hook \u2014 installed (AI auto-queries MindVault)"
+        )
     else:
         print(f"  \u2717 Auto-context hook \u2014 installation failed")
 
@@ -91,6 +100,7 @@ def cmd_install(args) -> None:
     # 8. Install daemon (auto-update every 5 min) unless --no-daemon
     if not getattr(args, "no_daemon", False):
         from mindvault.daemon import install_daemon, daemon_status
+
         status = daemon_status()
         if status.get("installed") and status.get("running"):
             print(f"  \u2713 Daemon \u2014 already running (skip)")
@@ -103,7 +113,9 @@ def cmd_install(args) -> None:
     else:
         print(f"  \u2014 Daemon \u2014 skipped (--no-daemon)")
 
-    print("\nMindVault is ready. Run `mindvault ingest .` to build your knowledge base.")
+    print(
+        "\nMindVault is ready. Run `mindvault ingest .` to build your knowledge base."
+    )
 
 
 def cmd_query(args) -> None:
@@ -118,7 +130,9 @@ def cmd_query(args) -> None:
         output_dir = Path("mindvault-out")
 
     if not output_dir.exists():
-        print(f"No MindVault data found at {output_dir}. Run `mindvault` or `/mindvault .` first.")
+        print(
+            f"No MindVault data found at {output_dir}. Run `mindvault` or `/mindvault .` first."
+        )
         sys.exit(1)
 
     result = query(args.question, output_dir, mode=args.mode, budget=args.budget)
@@ -139,7 +153,9 @@ def cmd_query(args) -> None:
             print(f"  {shown}. [{sr['title']}] (score: {sr['score']:.2f})")
             print(f"     {sr['snippet'][:80]}")
         if skipped:
-            print(f"  ({skipped} low-relevance results filtered, score < {MIN_SEARCH_SCORE})")
+            print(
+                f"  ({skipped} low-relevance results filtered, score < {MIN_SEARCH_SCORE})"
+            )
         if shown == 0 and skipped == 0:
             print("  (no results)")
     else:
@@ -184,6 +200,7 @@ def cmd_ingest(args) -> None:
     # Check if it's a URL
     if source.startswith("http://") or source.startswith("https://"):
         from mindvault.ingest import ingest
+
         output_dir = Path("mindvault-out")
         print(f"Ingesting URL: {source}")
         result = ingest(source, output_dir)
@@ -201,14 +218,17 @@ def cmd_ingest(args) -> None:
     ext = source_path.suffix.lower()
     if source_path.is_file() and ext in (".md", ".txt", ".rst", ".pdf"):
         from mindvault.ingest import ingest_file
+
         print(f"Ingesting file: {source_path}")
         result = ingest_file(source_path, output_dir)
         print(f"Result: {result}")
         return
 
     from mindvault.pipeline import run_incremental
+
+    verbose = getattr(args, "verbose", False)
     print(f"Ingesting: {source_path}")
-    result = run_incremental(source_path, output_dir)
+    result = run_incremental(source_path, output_dir, verbose=verbose)
     print(f"Result: {result}")
 
 
@@ -221,7 +241,9 @@ def cmd_lint(args) -> None:
     graph_path = output_dir / "graph.json"
 
     if not output_dir.exists():
-        print(f"No MindVault data found at {output_dir}. Run `mindvault` or `/mindvault .` first.")
+        print(
+            f"No MindVault data found at {output_dir}. Run `mindvault` or `/mindvault .` first."
+        )
         sys.exit(1)
 
     print("=== Wiki Lint ===")
@@ -262,6 +284,7 @@ def cmd_config(args) -> None:
     if action == "llm":
         if not args.value:
             from mindvault.config import get as get_config
+
             print(f"llm_endpoint: {get_config('llm_endpoint')}")
         else:
             set_config("llm_endpoint", args.value)
@@ -271,6 +294,7 @@ def cmd_config(args) -> None:
     if action == "auto-approve":
         if not args.value:
             from mindvault.config import get as get_config
+
             print(f"auto_approve_api: {get_config('auto_approve_api')}")
         else:
             val = args.value.lower() in ("true", "1", "yes")
@@ -281,6 +305,7 @@ def cmd_config(args) -> None:
     if action == "provider":
         if not args.value:
             from mindvault.config import get as get_config
+
             print(f"preferred_provider: {get_config('preferred_provider')}")
         else:
             set_config("preferred_provider", args.value)
@@ -290,6 +315,7 @@ def cmd_config(args) -> None:
     if action == "ollama-host":
         if not args.value:
             from mindvault.config import get as get_config
+
             print(f"ollama_host: {get_config('ollama_host')}")
         else:
             set_config("ollama_host", args.value)
@@ -299,6 +325,7 @@ def cmd_config(args) -> None:
     if action == "llm-model":
         if not args.value:
             from mindvault.config import get as get_config
+
             print(f"llm_model: {get_config('llm_model')}")
         else:
             set_config("llm_model", args.value)
@@ -330,6 +357,7 @@ def cmd_status(args) -> None:
         communities = len(data.get("communities", {}))
         mtime = os.path.getmtime(graph_path)
         from datetime import datetime
+
         last_updated = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
         print(f"  Graph: {nodes} nodes, {edges} edges, {communities} communities")
         print(f"  Last updated: {last_updated}")
@@ -414,16 +442,20 @@ def cmd_global(args) -> None:
     # Full global build
     from mindvault.global_ import run_global
 
+    verbose = getattr(args, "verbose", False)
     print(f"Discovering projects in {root}...")
-    result = run_global(root, output_dir)
+    result = run_global(root, output_dir, verbose=verbose)
     print(f"Found {result['projects']} projects.")
-    print(f"\nGlobal graph: {result['total_nodes']} nodes, {result['total_edges']} edges, "
-          f"{result['cross_project_edges']} cross-project links")
+    print(
+        f"\nGlobal graph: {result['total_nodes']} nodes, {result['total_edges']} edges, "
+        f"{result['cross_project_edges']} cross-project links"
+    )
     print(f"Wiki: {output_dir}/wiki/ ({result['wiki_pages']} pages)")
     print(f"Search index: {output_dir}/search_index.json ({result['index_docs']} docs)")
 
     if args.daemon:
         from mindvault.daemon import install_daemon
+
         success = install_daemon(root)
         if success:
             print(f"\nDaemon installed: com.mindvault.watcher")
@@ -471,9 +503,9 @@ def cmd_daemon(args) -> None:
         print(f"Installed: {status['installed']}")
         print(f"Running: {status['running']}")
         print(f"Mechanism: {status.get('mechanism', 'unknown')}")
-        if status.get('config_path'):
+        if status.get("config_path"):
             print(f"Config: {status['config_path']}")
-        if status.get('last_log_line'):
+        if status.get("last_log_line"):
             print(f"Last log: {status['last_log_line']}")
 
     elif action == "stop":
@@ -646,36 +678,67 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # install
-    sub_install = subparsers.add_parser("install", help="Install hooks and initialize MindVault in a project")
+    sub_install = subparsers.add_parser(
+        "install", help="Install hooks and initialize MindVault in a project"
+    )
     sub_install.add_argument("path", nargs="?", default=".", help="Project root path")
-    sub_install.add_argument("--no-daemon", action="store_true", help="Skip daemon installation")
+    sub_install.add_argument(
+        "--no-daemon", action="store_true", help="Skip daemon installation"
+    )
 
     # query
     sub_query = subparsers.add_parser("query", help="Query the knowledge graph")
     sub_query.add_argument("question", help="Question to answer")
-    sub_query.add_argument("--mode", default="bfs", choices=["bfs", "dfs", "hybrid"], help="Traversal mode")
+    sub_query.add_argument(
+        "--mode", default="bfs", choices=["bfs", "dfs", "hybrid"], help="Traversal mode"
+    )
     sub_query.add_argument("--budget", type=int, default=2000, help="Token budget")
-    sub_query.add_argument("--output-dir", default=None, help="MindVault output directory")
-    sub_query.add_argument("--global", dest="use_global", action="store_true", help="Use global ~/.mindvault/ index")
+    sub_query.add_argument(
+        "--output-dir", default=None, help="MindVault output directory"
+    )
+    sub_query.add_argument(
+        "--global",
+        dest="use_global",
+        action="store_true",
+        help="Use global ~/.mindvault/ index",
+    )
 
     # ingest
-    sub_ingest = subparsers.add_parser("ingest", help="Ingest files into the knowledge graph")
+    sub_ingest = subparsers.add_parser(
+        "ingest", help="Ingest files into the knowledge graph"
+    )
     sub_ingest.add_argument("path", nargs="?", default=".", help="Directory to ingest")
-    sub_ingest.add_argument("--incremental", action="store_true", help="Only process changed files")
+    sub_ingest.add_argument(
+        "--incremental", action="store_true", help="Only process changed files"
+    )
+    sub_ingest.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show progress messages during ingestion",
+    )
 
     # lint
     sub_lint = subparsers.add_parser("lint", help="Check wiki consistency")
-    sub_lint.add_argument("path", nargs="?", default=".mindvault", help="Wiki output directory")
+    sub_lint.add_argument(
+        "path", nargs="?", default=".mindvault", help="Wiki output directory"
+    )
 
     # status
-    sub_status = subparsers.add_parser("status", help="Show MindVault status for current project")
+    sub_status = subparsers.add_parser(
+        "status", help="Show MindVault status for current project"
+    )
 
     # watch
-    sub_watch = subparsers.add_parser("watch", help="Watch for file changes and auto-update")
+    sub_watch = subparsers.add_parser(
+        "watch", help="Watch for file changes and auto-update"
+    )
     sub_watch.add_argument("path", nargs="?", default=".", help="Directory to watch")
 
     # update (for git hook)
-    sub_update = subparsers.add_parser("update", help="Run incremental update (git hook)")
+    sub_update = subparsers.add_parser(
+        "update", help="Run incremental update (git hook)"
+    )
     sub_update.add_argument("--quiet", action="store_true", help="Suppress output")
 
     # mark-dirty (for Claude Code hook)
@@ -688,17 +751,33 @@ def main() -> None:
     # global
     sub_global = subparsers.add_parser("global", help="Global multi-project pipeline")
     sub_global.add_argument("root", help="Root directory to scan for projects")
-    sub_global.add_argument("--discover", action="store_true", help="Just list discovered projects")
-    sub_global.add_argument("--daemon", action="store_true", help="Build + install launchd daemon")
+    sub_global.add_argument(
+        "--discover", action="store_true", help="Just list discovered projects"
+    )
+    sub_global.add_argument(
+        "--daemon", action="store_true", help="Build + install launchd daemon"
+    )
+    sub_global.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show progress messages during global build",
+    )
 
     # config
     sub_config = subparsers.add_parser("config", help="Manage MindVault configuration")
-    sub_config.add_argument("config_action", choices=["llm", "auto-approve", "provider", "ollama-host", "llm-model", "show"], help="Config action")
+    sub_config.add_argument(
+        "config_action",
+        choices=["llm", "auto-approve", "provider", "ollama-host", "llm-model", "show"],
+        help="Config action",
+    )
     sub_config.add_argument("value", nargs="?", default=None, help="Value to set")
 
     # daemon
     sub_daemon = subparsers.add_parser("daemon", help="Manage MindVault daemon")
-    sub_daemon.add_argument("action", choices=["status", "stop", "log"], help="Daemon action")
+    sub_daemon.add_argument(
+        "action", choices=["status", "stop", "log"], help="Daemon action"
+    )
 
     # doctor
     subparsers.add_parser(

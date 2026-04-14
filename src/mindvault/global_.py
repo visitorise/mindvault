@@ -9,13 +9,16 @@ from pathlib import Path
 from mindvault.discover import discover_projects
 
 
-def run_global(root: Path, output_dir: Path = None, max_depth: int = 4) -> dict:
+def run_global(
+    root: Path, output_dir: Path = None, max_depth: int = 4, verbose: bool = False
+) -> dict:
     """Discover projects under root, run pipeline on each, merge into unified graph/wiki/index.
 
     Args:
         root: Root directory to scan for projects.
         output_dir: Global output directory (default: ~/.mindvault/).
         max_depth: Max BFS depth for project discovery.
+        verbose: If True, show progress messages. Default False.
 
     Returns:
         Dict with stats: projects, total_nodes, total_edges, cross_project_edges,
@@ -38,8 +41,12 @@ def run_global(root: Path, output_dir: Path = None, max_depth: int = 4) -> dict:
     projects = discover_projects(root, max_depth)
     if not projects:
         return {
-            "projects": 0, "total_nodes": 0, "total_edges": 0,
-            "cross_project_edges": 0, "wiki_pages": 0, "index_docs": 0,
+            "projects": 0,
+            "total_nodes": 0,
+            "total_edges": 0,
+            "cross_project_edges": 0,
+            "wiki_pages": 0,
+            "index_docs": 0,
         }
 
     # 2. Run pipeline on each project
@@ -50,7 +57,7 @@ def run_global(root: Path, output_dir: Path = None, max_depth: int = 4) -> dict:
     for proj in projects:
         proj_output = output_dir / proj["name"]
         try:
-            result = pipeline_run(proj["path"], proj_output)
+            result = pipeline_run(proj["path"], proj_output, verbose=verbose)
         except Exception as e:
             result = {"nodes": 0, "edges": 0, "communities": 0, "wiki_pages": 0}
 
@@ -82,17 +89,20 @@ def run_global(root: Path, output_dir: Path = None, max_depth: int = 4) -> dict:
             except (json.JSONDecodeError, OSError):
                 pass
 
-        project_results.append({
-            "name": proj["name"],
-            "path": str(proj["path"]),
-            "type": proj["type"],
-            "nodes": proj_nodes,
-            "edges": proj_edges,
-        })
+        project_results.append(
+            {
+                "name": proj["name"],
+                "path": str(proj["path"]),
+                "type": proj["type"],
+                "nodes": proj_nodes,
+                "edges": proj_edges,
+            }
+        )
 
     # 3. Add cross-project edges (shares_name_with)
     # Group nodes by their base name (without project prefix)
     from collections import defaultdict
+
     name_to_nodes: dict[str, list[str]] = defaultdict(list)
     for node in all_nodes:
         # Extract base name: project/file_entity -> entity part
@@ -104,13 +114,45 @@ def run_global(root: Path, output_dir: Path = None, max_depth: int = 4) -> dict:
 
     # Filter out generic/noisy labels that create meaningless cross-project edges
     GENERIC_LABELS = {
-        "Props", "props", "default", "index", "main", "App", "app",
-        "config", "Config", "utils", "helpers", "types", "constants",
-        "styles", "theme", "Layout", "layout", "Root", "root",
-        "Home", "home", "Header", "header", "Footer", "footer",
-        "Button", "button", "Modal", "modal", "Error", "error",
-        "Loading", "loading", "Container", "container",
-        "module", "Module", "init", "__init__",
+        "Props",
+        "props",
+        "default",
+        "index",
+        "main",
+        "App",
+        "app",
+        "config",
+        "Config",
+        "utils",
+        "helpers",
+        "types",
+        "constants",
+        "styles",
+        "theme",
+        "Layout",
+        "layout",
+        "Root",
+        "root",
+        "Home",
+        "home",
+        "Header",
+        "header",
+        "Footer",
+        "footer",
+        "Button",
+        "button",
+        "Modal",
+        "modal",
+        "Error",
+        "error",
+        "Loading",
+        "loading",
+        "Container",
+        "container",
+        "module",
+        "Module",
+        "init",
+        "__init__",
     }
 
     cross_edges = 0
@@ -133,14 +175,16 @@ def run_global(root: Path, output_dir: Path = None, max_depth: int = 4) -> dict:
                 p1 = node_ids[i].split("/", 1)[0]
                 p2 = node_ids[j].split("/", 1)[0]
                 if p1 != p2:
-                    all_edges.append({
-                        "source": node_ids[i],
-                        "target": node_ids[j],
-                        "relation": "shares_name_with",
-                        "confidence": "INFERRED",
-                        "confidence_score": 0.6,
-                        "weight": 0.5,
-                    })
+                    all_edges.append(
+                        {
+                            "source": node_ids[i],
+                            "target": node_ids[j],
+                            "relation": "shares_name_with",
+                            "confidence": "INFERRED",
+                            "confidence_score": 0.6,
+                            "weight": 0.5,
+                        }
+                    )
                     cross_edges += 1
 
     # 4. Build unified graph
@@ -167,6 +211,7 @@ def run_global(root: Path, output_dir: Path = None, max_depth: int = 4) -> dict:
 
     # 6b. Also index Claude Code memory files if they exist
     from mindvault.pipeline import _index_source_docs
+
     memory_patterns = [
         Path.home() / ".claude" / "projects",
     ]
@@ -174,7 +219,9 @@ def run_global(root: Path, output_dir: Path = None, max_depth: int = 4) -> dict:
         if mem_root.exists():
             for memory_dir in mem_root.rglob("memory"):
                 if memory_dir.is_dir():
-                    md_files = [str(f.relative_to(memory_dir)) for f in memory_dir.glob("*.md")]
+                    md_files = [
+                        str(f.relative_to(memory_dir)) for f in memory_dir.glob("*.md")
+                    ]
                     if md_files:
                         _index_source_docs(memory_dir, md_files, index_path)
                         index_docs += len(md_files)
@@ -241,6 +288,7 @@ def run_global_incremental(root: Path, output_dir: Path = None) -> dict:
         if proj["name"] in new_projects:
             # New project — full pipeline
             from mindvault.pipeline import run as pipeline_run
+
             try:
                 pipeline_run(proj["path"], proj_output)
                 updated += 1
@@ -257,6 +305,7 @@ def run_global_incremental(root: Path, output_dir: Path = None) -> dict:
 
     # Clean up removed projects
     import shutil
+
     for name in removed_projects:
         removed_dir = output_dir / name
         if removed_dir.exists():
@@ -273,12 +322,14 @@ def run_global_incremental(root: Path, output_dir: Path = None) -> dict:
                 nodes = len(gdata.get("nodes", []))
             except (json.JSONDecodeError, OSError):
                 pass
-        project_results.append({
-            "name": proj["name"],
-            "path": str(proj["path"]),
-            "type": proj["type"],
-            "nodes": nodes,
-        })
+        project_results.append(
+            {
+                "name": proj["name"],
+                "path": str(proj["path"]),
+                "type": proj["type"],
+                "nodes": nodes,
+            }
+        )
 
     manifest = {
         "root": str(root),
