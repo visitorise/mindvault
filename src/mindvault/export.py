@@ -114,7 +114,7 @@ def export_html(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MindVault Knowledge Graph</title>
-<script src="https://unpkg.com/vis-network/standalone/uml/vis-network.min.js"></script>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <style>
   body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }}
   #controls {{ position: fixed; top: 10px; left: 10px; z-index: 10; background: white;
