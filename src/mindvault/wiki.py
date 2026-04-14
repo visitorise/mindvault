@@ -21,16 +21,48 @@ def _slugify(label: str) -> str:
 
 
 def _community_label(G: nx.DiGraph, members: list[str]) -> str:
-    """Generate a human-readable label for a community from its top nodes."""
+    """Generate a human-readable label for a community.
+
+    Strategy (in priority order):
+    1. If members share a common source file → use filename as label
+    2. If a dominant node type exists → use "type: top_node"
+    3. Fallback → top 2 nodes by degree
+    """
     if not members:
         return "Empty Community"
-    # Pick top 2 nodes by degree
+
+    # Strategy 1: Common source file
+    src_files: Counter[str] = Counter()
+    for nid in members:
+        sf = G.nodes[nid].get("source_file", "")
+        if sf:
+            src_files[Path(sf).stem] += 1
+    if src_files:
+        top_file, top_count = src_files.most_common(1)[0]
+        if top_count >= len(members) * 0.5:  # >50% from same file
+            # Add the hub node label for specificity
+            by_degree = sorted(members, key=lambda n: G.degree(n), reverse=True)
+            hub_label = G.nodes[by_degree[0]].get("label", "")
+            if hub_label and hub_label.lower() != top_file.lower():
+                return f"{top_file} & {hub_label}"
+            return top_file
+
+    # Strategy 2: Dominant node type
+    node_types: Counter[str] = Counter()
+    for nid in members:
+        nt = G.nodes[nid].get("type", "")
+        if nt:
+            node_types[nt] += 1
+    if node_types:
+        dom_type = node_types.most_common(1)[0][0]
+        by_degree = sorted(members, key=lambda n: G.degree(n), reverse=True)
+        hub_label = G.nodes[by_degree[0]].get("label", by_degree[0])
+        return f"{hub_label}"
+
+    # Strategy 3: Fallback — top 2 by degree
     by_degree = sorted(members, key=lambda n: G.degree(n), reverse=True)
     top = by_degree[:2]
-    parts = []
-    for nid in top:
-        lbl = G.nodes[nid].get("label", nid)
-        parts.append(lbl)
+    parts = [G.nodes[nid].get("label", nid) for nid in top]
     return " & ".join(parts)
 
 
@@ -269,12 +301,19 @@ def generate_wiki(
                     rel = edata.get("relation", "related")
                     page_lines.append(f"- {ulabel} -> {rel} -> {vlabel} (-> [[{other_slug}]])")
 
-        # Context section (template-based, no LLM)
+        # Context section — rich summary with node types, patterns, and relationships
         page_lines.append("")
         page_lines.append("## Context")
 
         top_labels = [G.nodes[n].get("label", n) for n in by_degree[:3]]
         top_str = ", ".join(top_labels)
+
+        # Node type distribution
+        type_counter: Counter[str] = Counter()
+        for n in members:
+            nt = G.nodes[n].get("type", "unknown")
+            type_counter[nt] += 1
+        type_summary = ", ".join(f"{t}({c})" for t, c in type_counter.most_common(3))
 
         # Dominant relation
         rel_counter: Counter[str] = Counter()
@@ -282,7 +321,8 @@ def generate_wiki(
             for _, v, edata in G.out_edges(u, data=True):
                 if v in member_set:
                     rel_counter[edata.get("relation", "related")] += 1
-        dominant_rel = rel_counter.most_common(1)[0][0] if rel_counter else "related"
+        dominant_rels = [r for r, _ in rel_counter.most_common(2)]
+        rel_str = ", ".join(dominant_rels) if dominant_rels else "related"
 
         # Source files
         src_files = set()
@@ -292,10 +332,19 @@ def generate_wiki(
                 src_files.add(Path(sf).name)
         src_str = ", ".join(sorted(src_files)[:5]) if src_files else "N/A"
 
-        page_lines.append(
-            f"이 커뮤니티는 {top_str}를 중심으로 {dominant_rel} 관계로 연결되어 있다. "
-            f"주요 소스 파일은 {src_str}이다."
+        # External dependency count
+        ext_count = sum(
+            1 for u in members
+            for _, v, _ in G.out_edges(u, data=True)
+            if v not in member_set and v in G
         )
+
+        page_lines.append(f"**Hub nodes**: {top_str}")
+        page_lines.append(f"**Node types**: {type_summary}")
+        page_lines.append(f"**Key relations**: {rel_str}")
+        page_lines.append(f"**Source files**: {src_str}")
+        if ext_count > 0:
+            page_lines.append(f"**External dependencies**: {ext_count} outgoing cross-community links")
 
         # Key facts from source files
         facts = _collect_key_facts(G, members)
@@ -501,22 +550,40 @@ def update_wiki(
         page_lines.append("## Context")
         top_labels = [G.nodes[n].get("label", n) for n in by_degree[:3]]
         top_str = ", ".join(top_labels)
+
+        type_counter: Counter[str] = Counter()
+        for n in members:
+            nt = G.nodes[n].get("type", "unknown")
+            type_counter[nt] += 1
+        type_summary = ", ".join(f"{t}({c})" for t, c in type_counter.most_common(3))
+
         rel_counter: Counter[str] = Counter()
         for u in members:
             for _, v, edata in G.out_edges(u, data=True):
                 if v in member_set:
                     rel_counter[edata.get("relation", "related")] += 1
-        dominant_rel = rel_counter.most_common(1)[0][0] if rel_counter else "related"
+        dominant_rels = [r for r, _ in rel_counter.most_common(2)]
+        rel_str = ", ".join(dominant_rels) if dominant_rels else "related"
+
         src_files = set()
         for n in members:
             sf = G.nodes[n].get("source_file", "")
             if sf:
                 src_files.add(Path(sf).name)
         src_str = ", ".join(sorted(src_files)[:5]) if src_files else "N/A"
-        page_lines.append(
-            f"이 커뮤니티는 {top_str}를 중심으로 {dominant_rel} 관계로 연결되어 있다. "
-            f"주요 소스 파일은 {src_str}이다."
+
+        ext_count = sum(
+            1 for u in members
+            for _, v, _ in G.out_edges(u, data=True)
+            if v not in member_set and v in G
         )
+
+        page_lines.append(f"**Hub nodes**: {top_str}")
+        page_lines.append(f"**Node types**: {type_summary}")
+        page_lines.append(f"**Key relations**: {rel_str}")
+        page_lines.append(f"**Source files**: {src_str}")
+        if ext_count > 0:
+            page_lines.append(f"**External dependencies**: {ext_count} outgoing cross-community links")
 
         # Key facts from source files
         facts = _collect_key_facts(G, members)
