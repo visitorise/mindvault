@@ -235,6 +235,33 @@ PyPI 독립 패키지. `pip install mindvault-ai && mindvault install`
   - `_merge_extractions` expanded from 2-arg to `*results` (variadic). Node dedup by ID (first wins). Merge order: AST → doc_structure → semantic
   - compile.py integration: `extract_document_structure(doc_files)` called between `extract_ast` and `extract_semantic`
 
+### Step 13 — Rules Engine ✅
+- **Builder**: Bob
+- **Date**: 2026-04-14
+- **Status**: COMPLETE
+- **Files created**: 2 (rules.py, tests/test_rules.py)
+- **Files modified**: 5 (pyproject.toml, __init__.py, cli.py, hooks.py, lore.py)
+- **Verification** (all 24 tests PASS, 184 total):
+  - Test 1: rules.yaml 파싱 + 규칙 로드 — PASS
+  - Test 2: 정규식 매칭 — PASS
+  - Test 3: warn/block 구분 — PASS
+  - Test 4: 프로젝트 > 글로벌 우선순위 — PASS
+  - Test 5: CLI add/remove/list/check — PASS
+  - Test 6: hook 통합 (Bash 출력 감지) — PASS
+  - Test 7: Lore → Rules 제안 — PASS
+  - Test 8: 빈 규칙 파일 — PASS
+  - Test 9: 잘못된 정규식 (크래시 없음) — PASS
+  - Test 10: enabled: false 무시 — PASS
+  - + scope 필터링, format_output 등 14개 추가 테스트 — PASS
+- **Key decisions**:
+  - YAML+JSON 폴백: `try: import yaml` → `except: json fallback`
+  - scope 필터링: context="both"면 모든 규칙 매칭, "command"/"output"은 해당 scope만
+  - hook 보안: eval 패턴 제거 → null-byte separated read 패턴으로 교체
+  - hook에서 command/output 분리 체크 (2회 호출, 경계 false positive 방지)
+  - add_rule에 scope/enabled 파라미터 추가, YAML에 저장
+  - Lore 기록 시 `<lore-rule-suggestion>` 태그로 규칙 자동 제안
+- **Review findings**: BLOCKER 2 (scope dead code, eval injection) + SHOULD-FIX 4 → 전부 수정 완료
+
 ## Known Gaps
 
 - Cross-file call/import resolution: imports create edges to `{module}_module` IDs which may or may not exist as nodes; dangling ones are filtered by `build_graph`

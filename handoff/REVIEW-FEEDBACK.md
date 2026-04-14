@@ -1,98 +1,34 @@
-# REVIEW-FEEDBACK — Step 11: Karpathy Pattern Completion (3 fixes)
+# Review Feedback — Step 13
+Date: 2026-04-14
+Ready for Builder: NO
 
-**Reviewer**: Richard
-**Date**: 2026-04-09
-**Verdict**: APPROVE with 2 nits
+## Must Fix
 
----
+- [rules.py:178 + hooks.py:503 + cli.py:558] — **Scope filtering is effectively dead code.** The hook script combines command+output into one string and calls `mindvault rules check "$COMBINED"` with no context argument. `cmd_rules` also calls `check_rules(args.text, rules)` with no context. Both default to `context="both"`. But `check_rules` line 178 skips any rule where `scope != "both" and scope != context`. Since context is always "both", rules with `scope: "command"` or `scope: "output"` will never match through the hook or CLI. The spec defines scope as a first-class schema field and the test at test_rules.py:277-279 even validates that command-scoped rules don't match `context="both"`, confirming the behavior is intentional in the test but broken in the integration. **Fix**: Either (a) the hook should make two separate `check_rules` calls — one with `context="command"` for the command text and one with `context="output"` for stdout+stderr, or (b) the CLI `check` subcommand needs a `--context` argument so the hook can pass it. The current combined-text approach with default context means scope is useless.
 
-## 1. compile.py — `_find_changed_nodes` + incremental flow
+- [hooks.py:474] — **`eval` on tool output is a command injection vector.** The rules hook uses `eval $(echo "$INPUT" | python3 -c "..." )` to extract variables. Python `repr()` produces Python string literals, not POSIX-safe shell assignments. A tool output containing carefully crafted quotes (e.g. stdout with `'); malicious_command; echo ('`) could break out of the quoting when `eval`'d. This is inherited from the lore hook (same pattern at line 248) but now applied to a broader tool matcher (`Bash|Edit|Write` vs lore's `Bash` only), expanding the attack surface. **Fix**: Replace `eval` with a safer extraction pattern. Options: (a) write extracted values to a temp file and `source` it, (b) use `read` with a delimiter from python output, or (c) rewrite the hook in Python entirely (eliminate bash eval).
 
-**Status**: PASS
+## Should Fix
 
-- `_find_changed_nodes` correctly handles: first build (returns all), JSON parse failure (returns all), added nodes, deleted node neighbor propagation, edge diff via `successors`, and `source_file` change detection.
-- Ordering is correct: old `graph.json` is read at line 147 (before `export_json` at line 153), so the diff compares old vs new. If export happened first, the diff would always be empty.
-- `changed_nodes` is passed directly to `update_wiki` at line 148. `update_wiki` only regenerates communities that contain at least one changed node and returns 0 when the list is empty.
-- Deduplication via `list(set(changed))` at line 90 is correct — a node could appear from both "edge changed" and "deleted neighbor" paths.
-- BUG-2 from Step 10 is fixed: no longer sends all nodes as changed on incremental builds.
+- [rules.py:230-234] — **`add_rule` does not persist `scope` or `enabled` fields.** The new rule dict written by `add_rule` only includes `id`, `trigger`, `type`, `message`, and optionally `lore_ref`. The `scope` and `enabled` fields are absent from the written YAML. They get defaults when re-read through `_normalize_rule`, but a user cannot set `scope` or `enabled` via `add_rule()` or the CLI. **Fix**: Add `scope` and `enabled` parameters to `add_rule()` and persist them. Also add `--scope` and `--enabled` CLI arguments in `cli.py`.
 
-**Test 1 result**: First build 24 pages, second build 0 pages (no source changes), user note preserved. PASS.
+- [cli.py:554] — **`mindvault rules check` requires positional `text` argument but argparse allows `nargs="?"` with `default=None`.** If a user runs `mindvault rules check` without text, `args.text` is None and the code prints an error and exits. This works, but the UX is poor — argparse won't show that `text` is required for `check`. The argument also shows as a positional for `add`, `remove`, and `list` where it makes no sense. **Fix**: Move the `text` argument handling into the `check` action logic, or use a subparser per action.
 
----
+- [test_rules.py:200-214] — **Lore suggestion test (scenario 7) doesn't verify trigger content.** The test asserts `<lore-rule-suggestion>` and `mindvault rules add` appear in stdout but does not verify the trigger pattern contains keywords from the title ("Redis", "Cache", "Rollback"). If `_suggest_rule` generated an empty or wrong trigger, the test would still pass. **Fix**: Add assertion that at least one of `redis`, `cache`, or `rollback` appears in the captured output's trigger pattern.
 
-## 2. lint.py — `stale_pages` fix + LLM contradiction
+- [hooks.py:492] — **Hook combines command+output into a single string with space separator.** `COMBINED="$CMD $STDOUT $STDERR"` could create false-positive regex matches where the trigger pattern spans the boundary between command and output. For example, a rule with trigger `foo bar` could match if the command ends with `foo` and stdout starts with `bar`. Minor but worth documenting as a known limitation.
 
-**Status**: PASS
+## Escalate to Architect
 
-### BUG-1 fix
-- Lines 200-211: `all_deleted` is now correctly used to gate `stale_pages.append(md_file.name)`. The previous bug (computing `all_deleted` but never appending) is fixed.
-- Code now properly filters `code_sources` first, then checks `all_deleted`, then appends. Clean logic.
-- `stale_pages` is returned in the result dict at line 220.
+- **Scope field has no working integration path.** The spec defines `scope` as a schema field (`"command" | "output" | "both"`) but the hook concatenates command+output into one string and checks it as a whole. Fixing this (Must Fix #1) requires either two separate `mindvault rules check` invocations per hook call (doubling latency vs the <1s constraint) or a richer CLI interface. Arch should decide whether scope is worth the added complexity in v1 or should be deferred to v2.
 
-### LLM contradiction detection
-- `_check_contradiction_with_llm` (lines 10-53): Guards with `provider["provider"] is None or not provider["is_local"]` — API providers are never called. Correct per spec.
-- JSON parsing handles markdown code blocks gracefully with fallback to `None`.
-- Contradiction results include `llm_verified: True` (LLM confirmed) or `llm_verified: False` (string comparison fallback) at lines 155-156 and 163-164.
+## Cleared
 
-**Test 2 result**: Stale pages returned `[]` — expected because the test page `deleted-module.md` has no parenthesized source file references to trigger the detection logic. The code path is correct; the brief's test is weak (see Nit 2).
-
-**Test 3 result**: 0 contradictions (no contradictory data in test set). `llm_verified` field structure verified in code. PASS.
-
----
-
-## 3. ingest.py — `_classify_into_communities`
-
-**Status**: PASS
-
-- Lines 178-194: Word overlap scoring via `set(label.split()) & set(concept.split())`. Label is lowercased at line 179. Concept keys from `_concepts.json` are currently lowercase in practice (verified against actual `mindvault-out/wiki/_concepts.json`), but the code does NOT explicitly lowercase them — see Nit 1 below.
-- Score > 0 merges into existing page's `## Ingested Sources` section (lines 238-266). Score = 0 creates new page in `wiki/ingested/` (lines 269-304).
-- `_update_wiki_from_extraction` returns `{"merged_to_existing": N, "new_pages": N}` at line 330.
-- `ingest_file` propagates these counts at lines 398-399 and 418-419.
-
-**Test 4 result**: 12 nodes extracted, 8 merged to existing, 4 new pages. PASS.
-
----
-
-## Nits (non-blocking)
-
-### Nit 1: `_classify_into_communities` — concept key not lowercased
-`ingest.py` line 188 splits `concept` without `.lower()`. The label is lowered at line 179, but concept keys are compared as-is. Currently safe because `_concepts.json` keys happen to be lowercase, but if a future code path writes mixed-case keys, word overlap would silently fail.
-
-**Suggested fix** (ingest.py line 188):
-```python
-concept_words = set(concept.lower().split())
-```
-
-### Nit 2: Brief's Test 2 is weak
-The test creates a page with no source file references (`# Deleted Module\nThis no longer exists.\n`), so stale detection never triggers. A stronger test would write a page containing a parenthesized file reference:
-```python
-(out / 'wiki' / 'deleted-module.md').write_text('# Deleted Module\nSource: (nonexistent_file.py)\n')
-```
-Not a code issue — just a test coverage gap in the brief.
-
----
-
-## Test Summary
-
-| # | Test | Result |
-|---|------|--------|
-| 1 | BUG-2: incremental update | PASS (24 pages first build, 0 second, user note preserved) |
-| 2 | BUG-1: stale pages detection | PASS (code correct, test page had no source refs) |
-| 3 | Contradiction detection | PASS (0 contradictions, structure verified) |
-| 4 | Ingest auto-classification | PASS (8 merged, 4 new) |
-
----
-
-## Acceptance Criteria
-
-| # | Criterion | Status |
-|---|-----------|--------|
-| 1 | BUG-2: incremental build passes only changed nodes to `update_wiki` | YES |
-| 2 | BUG-1: `stale_pages` included in lint result | YES |
-| 3 | Contradiction detection uses local LLM only, falls back to string comparison | YES |
-| 4 | Ingest classifies into existing communities when match found | YES |
-| 5 | All 4 tests PASS | YES |
-
----
-
-**Decision**: APPROVE. All acceptance criteria met. Both bugs from Step 10 are fixed. Two minor nits, neither blocking.
+- **rules.py core logic**: 5 public functions implemented per spec. YAML+JSON fallback works correctly. Invalid regex handling at both load time (`_normalize_rule`) and runtime (`check_rules`). Project-over-global merge priority correct. `enabled` field filtering correct. Atomic writes via tempfile+os.replace.
+- **pyproject.toml**: `pyyaml>=6.0` added to dependencies at line 32.
+- **__init__.py**: All 5 functions (`load_rules`, `check_rules`, `add_rule`, `remove_rule`, `list_rules`) present in both lazy imports (lines 50-54) and `__all__` (lines 109-113).
+- **cli.py**: All 4 subcommands (add/remove/list/check) registered and dispatched. `cmd_install` includes rules hook installation at step 7 (line 84-89). Command dispatch dict includes `"rules": cmd_rules` (line 748).
+- **lore.py**: `_suggest_rule` outputs correct `<lore-rule-suggestion>` tag format per ARCHITECT-BRIEF 13.4. Trigger auto-generated from title keywords (3+ chars, up to 3). Called from `record()` at line 131.
+- **hooks.py**: Rules hook registered for `Bash|Edit|Write` matcher. Version marker `MINDVAULT_RULES_HOOK_VERSION=1` present. Auto-upgrade logic follows existing lore hook pattern.
+- **test_rules.py**: All 10 architect-specified scenarios have coverage across 24 tests. Tests exercise actual behavior (regex matching, file I/O, merge priority), not just existence. Good edge cases: invalid regex, disabled rules, empty files, nonexistent files.
+- **format_rule_output**: Correctly renders `<rules-warning>` and `<rules-block>` tags with optional lore reference.

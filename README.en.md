@@ -264,6 +264,16 @@ mindvault-out/
 | `mindvault daemon stop` | Stops the daemon |
 | `mindvault daemon log` | Checks daemon logs |
 
+### Rules Engine
+
+| Command | Description |
+|--------|------|
+| `mindvault rules add --id "no-redis" --trigger "redis" --type warn --message "msg"` | Add a rule |
+| `mindvault rules remove --id "no-redis"` | Remove a rule |
+| `mindvault rules list` | List all active rules |
+| `mindvault rules check "text"` | Manually check text for rule violations |
+| `mindvault rules check --context command "git push"` | Check command-only rules |
+
 ### Configuration
 
 | Command | Description |
@@ -702,6 +712,35 @@ mindvault lint
 - [graphify](https://github.com/safishamshi/graphify) — Generating knowledge graphs from codebases
 - [llm-wiki-compiler](https://github.com/nicholaschenai/llm-wiki-compiler) — Compiling knowledge into a wiki
 - [qmd](https://github.com/nicholaschenai/qmd) — Local BM25 Markdown Search
+
+---
+
+## Changelog (v0.7.0)
+
+**Rules Engine**: Enforces project-specific constraints by auto-injecting `<rules-warning>` or `<rules-block>` tags when AI tools violate rules. Upgrades MindVault from "learning AI" to "rule-following AI."
+
+- **`rules.py`**: Core module — `load_rules()`, `check_rules()`, `add_rule()`, `remove_rule()`, `list_rules()`
+- **Rule storage**: `mindvault-out/rules.yaml` (project) or `~/.mindvault/rules.yaml` (global). Project rules override global
+- **Rule types**: `warn` (inject warning) / `block` (inject block suggestion)
+- **Scope filtering**: `command` (input only), `output` (output only), `both` (all)
+- **PostToolUse hook**: Auto-checks rules on Bash/Edit/Write tool usage. Command/output checked separately to prevent boundary false positives
+- **Lore → Rules auto-suggestion**: When a Lore entry is recorded, suggests a matching rule via `<lore-rule-suggestion>` tag
+- **YAML+JSON fallback**: Uses PyYAML if available, falls back to JSON
+- **Security**: Removed eval pattern in hooks, replaced with null-byte separated read
+- **24 new tests** (184 total)
+
+**Usage:**
+```bash
+# Add a rule
+mindvault rules add --id "no-redis" --trigger "redis|Redis" --type warn \
+  --message "Redis had widget sync conflicts. Use SQLite instead."
+
+# Manual check
+mindvault rules check "installing redis"
+
+# List rules
+mindvault rules list
+```
 
 ---
 

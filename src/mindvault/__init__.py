@@ -1,6 +1,6 @@
 """MindVault — unified knowledge management: Search + Graph + Wiki."""
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 
 
 def __getattr__(name: str):
@@ -47,6 +47,11 @@ def __getattr__(name: str):
         "ingest": ("mindvault.ingest", "ingest"),
         "ingest_file": ("mindvault.ingest", "ingest_file"),
         "ingest_url": ("mindvault.ingest", "ingest_url"),
+        "load_rules": ("mindvault.rules", "load_rules"),
+        "check_rules": ("mindvault.rules", "check_rules"),
+        "add_rule": ("mindvault.rules", "add_rule"),
+        "remove_rule": ("mindvault.rules", "remove_rule"),
+        "list_rules": ("mindvault.rules", "list_rules"),
     }
 
     if name in _imports:
@@ -101,4 +106,9 @@ __all__ = [
     "ingest",
     "ingest_file",
     "ingest_url",
+    "load_rules",
+    "check_rules",
+    "add_rule",
+    "remove_rule",
+    "list_rules",
 ]

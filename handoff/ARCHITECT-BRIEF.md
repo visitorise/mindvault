@@ -1,132 +1,161 @@
 # ARCHITECT-BRIEF — MindVault
 
-## Step 12 — 문서 구조 추출 (Document Structure Extraction)
+## Step 13 — Rules Engine (Phase 2 하네스 엔지니어링)
 
-**Goal**: 2단계(Extract)에서 코드뿐 아니라 마크다운/텍스트/PDF의 구조도 추출. LLM 없이, 토큰 0으로 문서의 골격을 그래프 노드/엣지로 변환.
+**Goal**: 프로젝트별 규칙을 정의하고, AI가 규칙을 위반하려 할 때 시스템 레벨에서 강제로 경고를 주입하는 Rules Engine. Phase 1(Lore)의 기록이 실제로 참조되도록 강제하는 메커니즘.
 
-**Scope**: extract.py 확장
+**배경**: Phase 1에서 Lore 시스템(결정/실패 자동 기록)을 구현했지만, AI가 lore를 무시하고 같은 실수를 반복할 수 있음. Rules Engine이 있어야 "기억하는 AI"에서 "규칙을 따르는 AI"로 업그레이드됨.
+
+**Scope**: 새 모듈 `rules.py` + CLI 확장 + PostToolUse hook 통합
 
 ---
 
-### 12.1 extract.py — extract_document_structure 추가
+### 13.1 rules.py — 핵심 모듈
 
-```python
-def extract_document_structure(doc_files: list[Path]) -> dict:
-    """문서 파일에서 구조를 추출 (LLM 불필요, 토큰 0).
+**규칙 저장소**: `mindvault-out/rules.yaml` (프로젝트별) 또는 `~/.mindvault/rules.yaml` (글로벌)
+
+```yaml
+# mindvault-out/rules.yaml
+version: 1
+rules:
+  - id: no-redis-cache
+    trigger: "redis|Redis|REDIS"
+    type: warn
+    message: "Redis 캐시는 이전에 위젯 동기화 충돌로 롤백됨 (Lore 참조). SQLite 캐시를 사용할 것."
+    lore_ref: "2026-04-14-redis.md"
     
-    Returns: {nodes: [], edges: [], input_tokens: 0, output_tokens: 0}
-    """
+  - id: test-before-pr
+    trigger: "git push|gh pr create"
+    type: block
+    message: "PR 생성 전 반드시 테스트를 실행하세요: pytest tests/"
+    
+  - id: no-edit-config
+    trigger: "Edit.*config\\.production"
+    type: block
+    message: "프로덕션 설정 파일을 직접 수정하지 마세요."
+
+  - id: check-lore-before-architecture
+    trigger: "restructur|refactor|migrate|아키텍처"
+    type: warn  
+    message: "아키텍처 변경 전 관련 Lore 기록을 확인하세요: mindvault lore search --query '...'"
 ```
 
-**마크다운 (.md) 추출:**
-- `#` 헤더 계층 → 노드 (depth 1/2/3)
-- 헤더 간 parent-child 관계 → `contains` 엣지
-- `[링크](url)` → `references` 엣지 (같은 프로젝트 내 파일이면)
-- `` ```코드블록``` `` → `has_code_example` 엣지 (언어 태그가 있으면 해당 언어 노드 생성)
-- `[[wikilink]]` → `references` 엣지
-
-**텍스트 (.txt, .rst) 추출:**
-- 줄 패턴으로 섹션 감지 (빈 줄로 구분된 블록, 대문자 줄 = 제목)
-- RST의 `===` / `---` 밑줄 헤더 → 노드
-
-**PDF (.pdf) 추출:**
-- `pdftotext`로 텍스트 추출 시도
-- 없으면 skip (에러 아님)
-- 추출된 텍스트에서 대문자/숫자 시작 줄을 섹션 헤더로 추정
-
-**노드 ID 규칙**: `{filestem}_{heading_slug}` (소문자, 공백→언더스코어)
-**노드 스키마**: 기존 코드 노드와 동일
+**규칙 스키마:**
 ```python
-{"id": str, "label": str, "file_type": "document", "source_file": str, "source_location": "line N"}
+{
+    "id": str,           # 고유 ID
+    "trigger": str,      # 정규식 패턴 (도구 입력/출력과 매칭)
+    "type": "warn" | "block",  # warn=경고 주입, block=실행 차단 제안
+    "message": str,      # AI에게 주입할 메시지
+    "lore_ref": str | None,  # 관련 Lore 항목 (선택)
+    "scope": "command" | "output" | "both",  # 매칭 대상 (기본: both)
+    "enabled": bool,     # 활성화 여부 (기본: true)
+}
 ```
 
-**엣지 스키마**: 
+**함수:**
 ```python
-{"source": str, "target": str, "relation": "contains|references|has_code_example", 
- "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": str}
+def load_rules(output_dir: Path) -> list[dict]
+    """프로젝트 + 글로벌 규칙 로드. 프로젝트 규칙이 우선."""
+
+def check_rules(text: str, rules: list[dict], context: str = "both") -> list[dict]
+    """텍스트에서 규칙 위반 감지. 매칭된 규칙 리스트 반환."""
+
+def add_rule(output_dir: Path, rule_id: str, trigger: str, rule_type: str, message: str, lore_ref: str = None) -> Path
+    """규칙 추가. rules.yaml에 append."""
+
+def remove_rule(output_dir: Path, rule_id: str) -> bool
+    """규칙 제거."""
+
+def list_rules(output_dir: Path) -> list[dict]
+    """모든 활성 규칙 목록."""
 ```
 
 ---
 
-### 12.2 compile.py — 문서 구조 추출을 파이프라인에 통합
+### 13.2 PostToolUse hook 통합
 
-현재:
-```python
-ast_result = extract_ast(code_files)
-sem_result = extract_semantic(doc_files, output_dir)
-extraction = merge_extractions(ast_result, sem_result)
+기존 `mindvault-lore-hook.sh`를 확장하거나 새 `mindvault-rules-hook.sh` 생성.
+
+**동작 흐름:**
+1. AI가 Bash/Edit/Write 도구 사용
+2. hook이 stdin JSON에서 command + stdout + stderr 추출
+3. `mindvault rules check "텍스트"` 실행
+4. 매칭된 규칙이 있으면:
+   - `warn` → `<rules-warning>` 태그로 경고 주입
+   - `block` → `<rules-block>` 태그로 차단 제안 주입
+
+**출력 예시:**
+```
+<rules-warning>
+Rule: no-redis-cache
+Redis 캐시는 이전에 위젯 동기화 충돌로 롤백됨 (Lore 참조). SQLite 캐시를 사용할 것.
+Related lore: mindvault lore search --query "redis"
+</rules-warning>
 ```
 
-변경:
-```python
-ast_result = extract_ast(code_files)
-doc_result = extract_document_structure(doc_files)  # NEW
-sem_result = extract_semantic(doc_files, output_dir)
-extraction = merge_extractions(ast_result, doc_result, sem_result)  # 3-way merge
-```
-
-`_merge_extractions`을 2개→가변 인자로 확장.
+**중요**: hook은 도구 실행을 실제로 차단하지 않음 (Claude Code hook은 차단 권한 없음). `block` 타입도 강력한 경고를 주입할 뿐. AI가 판단해서 사용자에게 알리는 구조.
 
 ---
 
-### 12.3 테스트 시나리오
+### 13.3 CLI 확장
 
-```bash
-# Test 1: 마크다운 구조 추출
-python3 -c "
-from mindvault.extract import extract_document_structure
-from pathlib import Path
-result = extract_document_structure([Path('/Users/yonghaekim/my-folder/apps/mindvault/README.md')])
-print(f'Nodes: {len(result[\"nodes\"])}, Edges: {len(result[\"edges\"])}')
-for n in result['nodes'][:5]:
-    print(f'  {n[\"id\"]}: {n[\"label\"]}')
-assert len(result['nodes']) > 5, 'README should have many sections'
-assert result['input_tokens'] == 0, 'Should use 0 tokens'
-print('Test 1: PASS')
-"
-
-# Test 2: 전체 파이프라인에 통합 확인
-python3 -c "
-from mindvault.pipeline import run
-from pathlib import Path
-import shutil
-out = Path('/Users/yonghaekim/my-folder/apps/mindvault/mindvault-out')
-if out.exists(): shutil.rmtree(out)
-result = run(Path('/Users/yonghaekim/my-folder/apps/mindvault'), out)
-print(f'Nodes: {result[\"nodes\"]}, Edges: {result[\"edges\"]}')
-# Should have more nodes than before (code + document structure)
-assert result['nodes'] > 100, 'Should include doc structure nodes'
-print('Test 2: PASS')
-"
-
-# Test 3: 빈 문서 처리
-python3 -c "
-from mindvault.extract import extract_document_structure
-from pathlib import Path
-import tempfile
-with tempfile.NamedTemporaryFile(suffix='.md', mode='w', delete=False) as f:
-    f.write('')
-    f.flush()
-    result = extract_document_structure([Path(f.name)])
-    print(f'Empty doc: {len(result[\"nodes\"])} nodes')
-    print('Test 3: PASS')
-"
 ```
+mindvault rules add --id "rule-id" --trigger "pattern" --type warn --message "메시지"
+mindvault rules remove --id "rule-id"
+mindvault rules list
+mindvault rules check "텍스트"   # 수동 테스트용
+```
+
+**mindvault install에 통합:**
+- 설치 시 rules hook 자동 등록 (lore hook과 동일 패턴)
+- 기본 규칙 없음 — 사용자가 직접 추가하거나 lore 기반 자동 제안
 
 ---
 
-### 12.4 Constraints
+### 13.4 Lore → Rules 자동 제안
 
-- LLM 호출 없음 — 순수 파싱만
-- `input_tokens`와 `output_tokens`는 항상 0
-- PDF에서 `pdftotext` 없으면 조용히 skip
-- 기존 extract_ast, extract_semantic과 독립적으로 동작
-- `_merge_extractions`에서 노드 ID 중복 시 첫 번째 유지 (기존 동작과 동일)
+Lore 항목이 기록될 때, 관련 규칙을 자동 제안:
 
-### 12.5 Acceptance Criteria
+```
+<lore-rule-suggestion>
+방금 기록된 Lore: "Redis 캐시 롤백"
+이 실수를 방지하는 규칙을 추가할까요?
+mindvault rules add --id "no-redis" --trigger "redis" --type warn --message "Redis는 위젯 충돌 이력 있음"
+</lore-rule-suggestion>
+```
 
-1. README.md에서 5개+ 섹션 노드 추출
-2. 토큰 사용량 0
-3. 파이프라인에 통합되어 전체 노드 수 증가
-4. 빈 문서 처리 시 에러 없음
-5. 3개 테스트 모두 PASS
+이것도 Lore의 lazy onboarding과 동일 패턴 — 자동 기록이 아니라 제안 후 사용자 승인.
+
+---
+
+### 13.5 테스트 시나리오
+
+1. rules.yaml 파싱 + 규칙 로드
+2. 텍스트에서 규칙 매칭 (정규식)
+3. warn/block 구분 동작
+4. 프로젝트 규칙이 글로벌 규칙보다 우선
+5. CLI add/remove/list/check 동작
+6. hook 통합 — Bash 출력에서 규칙 위반 감지
+7. Lore → Rules 제안 동작
+8. 빈 규칙 파일 처리
+9. 잘못된 정규식 처리 (에러 안 남)
+10. enabled: false인 규칙 무시
+
+---
+
+### 13.6 Constraints
+
+- YAML 파서: PyYAML 의존성 추가 필요 (pyproject.toml). 없으면 JSON 폴백
+- hook 성능: 규칙 체크는 1초 이내 (정규식 매칭만, LLM 없음)
+- 기존 lore hook과 충돌 없어야 함 — 별도 hook이거나 기존 hook 확장
+- Claude Code 전용 아닌 기능도 있어야 함 (CLI `rules check`는 어디서든 사용 가능)
+
+### 13.7 Acceptance Criteria
+
+1. `mindvault rules add` → rules.yaml에 규칙 추가됨
+2. `mindvault rules check "redis 설치"` → 매칭된 규칙 출력
+3. PostToolUse hook에서 규칙 위반 시 `<rules-warning>` 주입
+4. Lore 기록 시 규칙 제안 출력
+5. 10개 테스트 전부 PASS
+6. 기존 160개 테스트 깨지지 않음

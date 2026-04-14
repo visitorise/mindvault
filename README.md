@@ -264,6 +264,16 @@ mindvault-out/
 | `mindvault daemon stop` | 데몬 중지 |
 | `mindvault daemon log` | 데몬 로그 확인 |
 
+### 규칙 엔진
+
+| 명령어 | 설명 |
+|--------|------|
+| `mindvault rules add --id "no-redis" --trigger "redis" --type warn --message "메시지"` | 규칙 추가 |
+| `mindvault rules remove --id "no-redis"` | 규칙 제거 |
+| `mindvault rules list` | 모든 활성 규칙 목록 |
+| `mindvault rules check "텍스트"` | 텍스트에서 규칙 위반 수동 검사 |
+| `mindvault rules check --context command "git push"` | 명령어 전용 규칙만 검사 |
+
 ### 설정
 
 | 명령어 | 설명 |
@@ -700,6 +710,35 @@ mindvault lint
 - [graphify](https://github.com/safishamshi/graphify) — 코드베이스 지식 그래프 생성
 - [llm-wiki-compiler](https://github.com/nicholaschenai/llm-wiki-compiler) — 지식을 위키로 컴파일
 - [qmd](https://github.com/nicholaschenai/qmd) — 로컬 BM25 마크다운 검색
+
+---
+
+## 변경 내역 (v0.7.0)
+
+**Rules Engine**: Lore에 기록된 실수를 **규칙으로 강제**합니다. AI가 도구를 사용할 때 규칙 위반을 자동 감지하여 `<rules-warning>` 또는 `<rules-block>` 태그를 주입합니다. '학습하는 AI'에서 '규칙을 따르는 AI'로의 업그레이드.
+
+- **`rules.py`**: 핵심 모듈 — `load_rules()`, `check_rules()`, `add_rule()`, `remove_rule()`, `list_rules()`
+- **규칙 저장소**: `mindvault-out/rules.yaml` (프로젝트별) 또는 `~/.mindvault/rules.yaml` (글로벌). 프로젝트 규칙이 글로벌보다 우선
+- **규칙 타입**: `warn` (경고 주입) / `block` (차단 제안 주입)
+- **scope 필터링**: `command` (입력만), `output` (출력만), `both` (전부)
+- **PostToolUse hook**: Bash/Edit/Write 도구 사용 시 자동 규칙 체크. command/output을 분리 검사하여 경계 오탐 방지
+- **Lore → Rules 자동 제안**: Lore 기록 시 관련 규칙을 `<lore-rule-suggestion>` 태그로 제안
+- **YAML+JSON 폴백**: PyYAML 있으면 YAML, 없으면 JSON으로 자동 전환
+- **보안**: hook에서 eval 패턴 제거, null-byte separated read로 교체
+- **테스트 24개 추가** (총 184개)
+
+**사용법:**
+```bash
+# 규칙 추가
+mindvault rules add --id "no-redis" --trigger "redis|Redis" --type warn \
+  --message "Redis는 위젯 충돌 이력 있음. SQLite 사용 권장."
+
+# 규칙 검사 (수동)
+mindvault rules check "redis 설치하려고 합니다"
+
+# 규칙 목록
+mindvault rules list
+```
 
 ---
 

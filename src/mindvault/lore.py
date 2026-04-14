@@ -127,7 +127,31 @@ tags: [{tags_str}]
     if index_path.exists():
         _index_lore_entry(filepath, output_dir, index_path)
 
+    # Suggest a rule based on this lore entry
+    _suggest_rule(title, slug, lore_type)
+
     return filepath
+
+
+def _suggest_rule(title: str, slug: str, lore_type: str) -> None:
+    """Print a rule suggestion tag after recording a lore entry."""
+    # Build a simple trigger from the title keywords (lowercase, alpha only)
+    keywords = re.findall(r"[a-zA-Z]+", title.lower())
+    if not keywords:
+        return
+    # Use the most distinctive keyword(s) as trigger
+    trigger_parts = [k for k in keywords if len(k) >= 3][:3]
+    if not trigger_parts:
+        return
+    trigger = "|".join(trigger_parts)
+    rule_id = f"no-{slug[:30]}"
+    rule_type = "warn"
+
+    print(f"\n<lore-rule-suggestion>")
+    print(f'Lore recorded: "{title}"')
+    print(f"Prevent this from recurring with a rule:")
+    print(f'mindvault rules add --id "{rule_id}" --trigger "{trigger}" --type {rule_type} --message "See lore: {title}"')
+    print(f"</lore-rule-suggestion>")
 
 
 def list_entries(output_dir: Path, lore_type: str | None = None) -> list[dict]:

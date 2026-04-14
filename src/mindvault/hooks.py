@@ -233,10 +233,12 @@ def install_prompt_hook() -> bool:
 
 _LORE_HOOK_SCRIPT_TEMPLATE = '''#!/bin/bash
 # MindVault Lore detection hook (PostToolUse)
-# MINDVAULT_LORE_HOOK_VERSION=2
+# MINDVAULT_LORE_HOOK_VERSION=3
 #
 # Detects lore-worthy events from Bash tool output (stdout + stderr + command)
 # and either auto-records, suggests, or shows a one-time onboarding notice.
+#
+# v3: Replaced eval with safe null-byte extraction to prevent command injection.
 
 # Read stdin JSON (Claude Code PostToolUse spec)
 INPUT=$(cat)
@@ -244,8 +246,8 @@ if [ -z "$INPUT" ]; then
     exit 0
 fi
 
-# Extract tool name, stdout, stderr, and command from payload
-eval $(echo "$INPUT" | python3 -c "
+# Extract fields safely: Python outputs null-byte separated values
+EXTRACTED=$(printf '%s' "$INPUT" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -253,14 +255,22 @@ try:
     stdout = d.get('stdout', d.get('output', ''))[:2000]
     stderr = d.get('stderr', '')[:1000]
     cmd = d.get('command', d.get('input', ''))[:500]
-    # Shell-safe export via repr
-    print(f'TOOL_NAME={repr(tool)}')
-    print(f'STDOUT={repr(stdout)}')
-    print(f'STDERR={repr(stderr)}')
-    print(f'CMD={repr(cmd)}')
+    sys.stdout.write(tool + '\\0')
+    sys.stdout.write(cmd + '\\0')
+    sys.stdout.write(stdout + '\\0')
+    sys.stdout.write(stderr + '\\0')
 except:
-    print('TOOL_NAME=\"\"')
+    sys.stdout.write('\\0\\0\\0\\0')
 " 2>/dev/null)
+
+# Parse null-byte separated values
+IFS= read -r -d '' TOOL_NAME <<< "$EXTRACTED" || true
+REST="${EXTRACTED#*$'\\0'}"
+IFS= read -r -d '' CMD <<< "$REST" || true
+REST="${REST#*$'\\0'}"
+IFS= read -r -d '' STDOUT <<< "$REST" || true
+REST="${REST#*$'\\0'}"
+IFS= read -r -d '' STDERR <<< "$REST" || true
 
 # Only process Bash tool calls
 if [ "$TOOL_NAME" != "Bash" ]; then
@@ -414,7 +424,7 @@ def install_lore_hook() -> bool:
     if hook_path.exists():
         try:
             existing = hook_path.read_text(encoding="utf-8")
-            if "MINDVAULT_LORE_HOOK_VERSION=2" in existing and mindvault_bin in existing:
+            if "MINDVAULT_LORE_HOOK_VERSION=3" in existing and mindvault_bin in existing:
                 needs_write = False
         except (OSError, UnicodeDecodeError):
             pass
@@ -442,6 +452,157 @@ def install_lore_hook() -> bool:
     if not already_installed:
         post_tool_hooks.append({
             "matcher": "Bash",
+            "hooks": [{
+                "type": "command",
+                "command": str(hook_path),
+            }],
+        })
+
+    settings_path.write_text(
+        json.dumps(settings, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return True
+
+
+MINDVAULT_RULES_HOOK_VERSION = 2
+
+_RULES_HOOK_SCRIPT_TEMPLATE = '''#!/bin/bash
+# MindVault Rules Engine hook (PostToolUse)
+# MINDVAULT_RULES_HOOK_VERSION=2
+#
+# Checks tool input/output against project rules and injects
+# <rules-warning> or <rules-block> tags when violations are found.
+#
+# v2: Replaced eval with safe read-based extraction. Two separate
+#     check calls with --context for proper scope filtering.
+
+# Read stdin JSON (Claude Code PostToolUse spec)
+INPUT=$(cat)
+if [ -z "$INPUT" ]; then
+    exit 0
+fi
+
+# Extract fields safely: Python outputs null-byte separated values,
+# shell reads them with read -d ''.
+EXTRACTED=$(printf '%s' "$INPUT" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    tool = d.get('tool_name', d.get('toolName', ''))
+    stdout = d.get('stdout', d.get('output', ''))[:2000]
+    stderr = d.get('stderr', '')[:1000]
+    cmd = d.get('command', d.get('input', ''))[:500]
+    sys.stdout.write(tool + '\\0')
+    sys.stdout.write(cmd + '\\0')
+    sys.stdout.write(stdout + '\\0')
+    sys.stdout.write(stderr + '\\0')
+except:
+    sys.stdout.write('\\0\\0\\0\\0')
+" 2>/dev/null)
+
+# Parse null-byte separated values
+IFS= read -r -d '' TOOL_NAME <<< "$EXTRACTED" || true
+REST="${EXTRACTED#*$'\\0'}"
+IFS= read -r -d '' CMD <<< "$REST" || true
+REST="${REST#*$'\\0'}"
+IFS= read -r -d '' STDOUT <<< "$REST" || true
+REST="${REST#*$'\\0'}"
+IFS= read -r -d '' STDERR <<< "$REST" || true
+
+if [ -z "$CMD" ] && [ -z "$STDOUT" ] && [ -z "$STDERR" ]; then
+    exit 0
+fi
+
+MINDVAULT="{{MINDVAULT_PATH}}"
+if [ ! -x "$MINDVAULT" ]; then
+    command -v mindvault >/dev/null 2>&1 && MINDVAULT="mindvault" || exit 0
+fi
+
+# Run rules check with separate contexts for proper scope filtering.
+# Command check: only matches rules with scope "command" or "both".
+# Output check: only matches rules with scope "output" or "both".
+OUTPUT_TEXT="${STDOUT}
+---MINDVAULT_SEPARATOR---
+${STDERR}"
+
+RESULT=""
+if [ -n "$CMD" ]; then
+    R1=$($MINDVAULT rules check --context command "$CMD" 2>/dev/null)
+    if [ -n "$R1" ] && echo "$R1" | grep -qE "<rules-(warning|block)>"; then
+        RESULT="$R1"
+    fi
+fi
+
+if [ -n "$STDOUT" ] || [ -n "$STDERR" ]; then
+    R2=$($MINDVAULT rules check --context output "$OUTPUT_TEXT" 2>/dev/null)
+    if [ -n "$R2" ] && echo "$R2" | grep -qE "<rules-(warning|block)>"; then
+        if [ -n "$RESULT" ]; then
+            RESULT="${RESULT}
+${R2}"
+        else
+            RESULT="$R2"
+        fi
+    fi
+fi
+
+if [ -n "$RESULT" ]; then
+    echo "$RESULT"
+fi
+
+exit 0
+'''
+
+
+def install_rules_hook() -> bool:
+    """Install the PostToolUse rules engine hook.
+
+    Checks tool input/output against project rules and injects
+    warning/block tags when violations are detected.
+
+    Returns:
+        True if installed successfully.
+    """
+    hooks_dir = Path.home() / ".claude" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / "mindvault-rules-hook.sh"
+
+    mindvault_bin = _resolve_mindvault_path()
+    script = _RULES_HOOK_SCRIPT_TEMPLATE.replace("{{MINDVAULT_PATH}}", mindvault_bin)
+
+    needs_write = True
+    if hook_path.exists():
+        try:
+            existing = hook_path.read_text(encoding="utf-8")
+            if (f"MINDVAULT_RULES_HOOK_VERSION={MINDVAULT_RULES_HOOK_VERSION}" in existing
+                    and mindvault_bin in existing):
+                needs_write = False
+        except (OSError, UnicodeDecodeError):
+            pass
+
+    if needs_write:
+        hook_path.write_text(script, encoding="utf-8")
+    hook_path.chmod(0o755)
+
+    # Register in settings.json
+    settings_path = Path.home() / ".claude" / "settings.json"
+    settings = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            settings = {}
+
+    hooks = settings.setdefault("hooks", {})
+    post_tool_hooks = hooks.setdefault("PostToolUse", [])
+
+    already_installed = any(
+        "mindvault-rules-hook" in str(h.get("hooks", h.get("command", "")))
+        for h in post_tool_hooks
+    )
+    if not already_installed:
+        post_tool_hooks.append({
+            "matcher": "Bash|Edit|Write",
             "hooks": [{
                 "type": "command",
                 "command": str(hook_path),

@@ -1,53 +1,58 @@
-# REVIEW-REQUEST — Step 12: Document Structure Extraction
+# REVIEW-REQUEST — Step 13: Rules Engine (Post-Review Fix)
 
 **Builder**: Bob
-**Date**: 2026-04-09
-**Step**: 12 — Document Structure Extraction (Markdown/Text/RST/PDF parsing, zero LLM)
+**Date**: 2026-04-14
+**Step**: 13 — Rules Engine (Phase 2 harness engineering)
+**Ready for Review**: YES
 
-## Files Modified (3)
+## Review Fixes Applied (6/6)
 
-1. **`src/mindvault/extract.py`** — Added `extract_document_structure` + 3 parser functions:
-   - `extract_document_structure(doc_files)` — main entry point, dispatches by extension
-   - `_parse_markdown` — parses `#` headers (depth 1-3) into nodes with parent-child `contains` edges via stack, `[link](url)` → `references` edges (internal only, skips http/anchors), `` ```lang``` `` → `has_code_example` edges with language nodes, `[[wikilink]]` → `references` edges
-   - `_parse_text` — RST underline headers (`===`, `---`, etc.) and plain .txt uppercase-line sections
-   - `_parse_pdf` — `pdftotext` subprocess with `shutil.which` guard + 30s timeout, silent skip on failure
-   - All nodes: `file_type: "document"`, `source_location: "line N"`
-   - All edges: `confidence: "EXTRACTED"`, `confidence_score: 1.0`
-   - Node ID: `{filestem}_{heading_slug}` via `_sanitize_id`
-   - Internal dedup via `seen_ids` set (first node wins)
+### Must Fix
 
-2. **`src/mindvault/compile.py`** — Integration + merge expansion:
-   - `_merge_extractions` changed from `(ast_result, sem_result)` to `(*results)` variadic
-   - Node deduplication by ID in merge (first occurrence wins across all results)
-   - Merge order: AST → doc_structure → semantic (AST nodes take priority)
-   - `compile()` now calls 3 extractors: `extract_ast` → `extract_document_structure` → `extract_semantic`
+1. **Scope filtering dead code** (rules.py + hooks.py + cli.py)
+   - `check_rules()` line 178: flipped logic — `context="both"` now matches ALL rules regardless of their scope. Only filters when context is specifically "command" or "output".
+   - Hook script (v2): makes TWO separate `mindvault rules check` calls — `--context command "$CMD"` and `--context output "$OUTPUT_TEXT"`. Combines results.
+   - CLI: added `--context` argument to `rules check` (choices: command, output, both; default: both).
+   - Test `test_command_scope_matches_command_and_both_context`: fixed assertion — command-scoped rules now correctly match `context="both"`.
 
-3. **`src/mindvault/__init__.py`** — Export `extract_document_structure`
+2. **eval command injection in hook** (hooks.py)
+   - Rules hook (v2): replaced `eval $(...)` with null-byte separated Python output + `read -d ''` parsing. No shell interpretation of user data.
+   - Lore hook (v3): same fix applied. Version bumped from 2 to 3.
+   - Updated lore hook version test in test_lore.py to match v3.
 
-## Test Results (all 3 PASS)
+### Should Fix
 
-| # | Test | Result | Detail |
-|---|------|--------|--------|
-| 1 | Markdown structure extraction | PASS | README.md → 12 nodes, 13 edges, 0 input_tokens, 0 output_tokens |
-| 2 | Full pipeline integration | PASS | 453 nodes, 559 edges (was ~271 without doc structure — 67% increase) |
-| 3 | Empty document | PASS | 0 nodes, no errors |
+3. **add_rule doesn't persist scope/enabled** (rules.py + cli.py)
+   - `add_rule()` now accepts `scope="both"` and `enabled=True` parameters.
+   - Both fields are persisted in the YAML output.
+   - CLI: added `--scope` (choices: command, output, both) and `--enabled`/`--disabled` arguments.
 
-## Review Focus Areas
+4. **argparse text argument exposed to all rules subcommands** (cli.py)
+   - Moved `text` positional to the end of rules subparser args with explicit help "(only for check action)".
+   - Named args (--id, --trigger, etc.) now appear before the optional positional, so argparse help is clearer.
 
-1. **Markdown parser code-block tracking**: `in_code_block` toggle prevents false header detection inside fenced code blocks. The toggle tracks `` ``` `` lines. Edge case: nested code blocks (rare) would cause toggle confusion — acceptable tradeoff.
+5. **Lore suggestion test doesn't verify trigger content** (test_rules.py)
+   - Added assertion: at least one of "redis", "cache", "rollback" must appear in the captured output's trigger pattern.
 
-2. **Variadic `_merge_extractions`**: The old 2-arg version simply concatenated nodes. The new version deduplicates by node ID (first wins). This is a behavior change — previously if AST and semantic both produced a node with the same ID, both would appear. Now only the first survives. This matches the brief spec ("first wins") and prevents graph bloat.
+6. **Hook command+output boundary false positives** (hooks.py)
+   - Rules hook now uses `\n---MINDVAULT_SEPARATOR---\n` between stdout and stderr in the output text.
+   - Command and output are checked in separate `mindvault rules check` calls (Fix 1), which inherently eliminates cross-boundary false positives.
 
-3. **PDF silent skip**: Two levels of safety — `shutil.which("pdftotext")` returns `None` if binary not installed (returns immediately), and `subprocess.run` has a 30s timeout. Both paths return without error.
+## Files Modified
 
-4. **RST header detection**: Uses "previous line is text + current line is all same char (from `=-~^` etc.)" heuristic. This matches the RST spec but doesn't distinguish header levels (all are flat nodes). Acceptable since RST files are rare in most codebases.
+| File | Lines Changed | What |
+|---|---|---|
+| `src/mindvault/rules.py` | 178, 192-244 | Fix 1 (scope logic), Fix 3 (add_rule params) |
+| `src/mindvault/hooks.py` | 234-392, 458-510 | Fix 2 (eval removal), Fix 6 (separator) |
+| `src/mindvault/cli.py` | 514-527, 553-563, 717-728 | Fix 1 (--context), Fix 3 (--scope/--enabled), Fix 4 (text arg) |
+| `tests/test_rules.py` | 200-214, 271-279 | Fix 1 (scope test), Fix 5 (trigger assertion) |
+| `tests/test_lore.py` | 256-258 | Lore hook version test updated to v3 |
 
-## Acceptance Criteria Check
+## Verification
 
-| # | Criterion | Status |
-|---|-----------|--------|
-| 1 | README.md: 5+ section nodes extracted | YES (12 nodes) |
-| 2 | Token usage: 0 | YES (input_tokens=0, output_tokens=0) |
-| 3 | Pipeline integration: total nodes increased | YES (271 → 453, +67%) |
-| 4 | Empty document: no crash | YES (0 nodes returned) |
-| 5 | All 3 tests PASS | YES |
+```
+$ python3 -m pytest tests/ -v
+184 passed in 311.25s
+```
+
+All 184 tests pass. Zero regressions.

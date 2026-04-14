@@ -253,9 +253,9 @@ class TestLoreHookPatterns:
         from mindvault.hooks import _LORE_HOOK_SCRIPT_TEMPLATE
         assert "command" in _LORE_HOOK_SCRIPT_TEMPLATE
 
-    def test_hook_version_is_2(self):
+    def test_hook_version_is_3(self):
         from mindvault.hooks import _LORE_HOOK_SCRIPT_TEMPLATE
-        assert "MINDVAULT_LORE_HOOK_VERSION=2" in _LORE_HOOK_SCRIPT_TEMPLATE
+        assert "MINDVAULT_LORE_HOOK_VERSION=3" in _LORE_HOOK_SCRIPT_TEMPLATE
 
     def test_notice_does_not_write_flag(self):
         """Codex finding #6: .lore-noticed should NOT be written by the hook."""

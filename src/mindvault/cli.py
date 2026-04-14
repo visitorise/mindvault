@@ -81,7 +81,14 @@ def cmd_install(args) -> None:
     else:
         print(f"  \u2717 Lore hook \u2014 installation failed")
 
-    # 7. Install daemon (auto-update every 5 min) unless --no-daemon
+    # 7. Install Rules Engine hook
+    from mindvault.hooks import install_rules_hook
+    if install_rules_hook():
+        print(f"  \u2713 Rules hook \u2014 installed (enforces project rules)")
+    else:
+        print(f"  \u2717 Rules hook \u2014 installation failed")
+
+    # 8. Install daemon (auto-update every 5 min) unless --no-daemon
     if not getattr(args, "no_daemon", False):
         from mindvault.daemon import install_daemon, daemon_status
         status = daemon_status()
@@ -489,6 +496,74 @@ def cmd_daemon(args) -> None:
         sys.exit(1)
 
 
+def cmd_rules(args) -> None:
+    """Manage project rules (add/remove/list/check)."""
+    from mindvault.rules import add_rule, remove_rule, list_rules, load_rules, check_rules, format_rule_output
+
+    action = args.rules_action
+
+    # Resolve output directory
+    output_dir = Path(args.output_dir) if args.output_dir else Path("mindvault-out")
+    if action != "check" and not output_dir.exists():
+        global_dir = Path.home() / ".mindvault"
+        if global_dir.exists():
+            output_dir = global_dir
+        else:
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+    if action == "add":
+        if not args.id or not args.trigger or not args.message:
+            print("Error: --id, --trigger, and --message are required for add")
+            sys.exit(1)
+        try:
+            path = add_rule(
+                output_dir=output_dir,
+                rule_id=args.id,
+                trigger=args.trigger,
+                rule_type=args.type or "warn",
+                message=args.message,
+                lore_ref=args.lore_ref,
+                scope=args.scope or "both",
+                enabled=args.enabled,
+            )
+            print(f"Rule added: {args.id} -> {path}")
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+    elif action == "remove":
+        if not args.id:
+            print("Error: --id is required for remove")
+            sys.exit(1)
+        removed = remove_rule(output_dir, args.id)
+        if removed:
+            print(f"Rule removed: {args.id}")
+        else:
+            print(f"Rule not found: {args.id}")
+            sys.exit(1)
+
+    elif action == "list":
+        rules = list_rules(output_dir)
+        if not rules:
+            print("No rules configured.")
+            return
+        for r in rules:
+            type_icon = "\u26d4" if r["type"] == "block" else "\u26a0\ufe0f"
+            lore = f" (lore: {r['lore_ref']})" if r.get("lore_ref") else ""
+            print(f"  {type_icon} [{r['id']}] /{r['trigger']}/ -> {r['message'][:60]}{lore}")
+
+    elif action == "check":
+        if not args.text:
+            print("Error: text argument is required for check")
+            sys.exit(1)
+        rules = load_rules(output_dir)
+        matched = check_rules(args.text, rules, context=args.context or "both")
+        if not matched:
+            print("No rules matched.")
+            return
+        print(format_rule_output(matched))
+
+
 def cmd_lore(args) -> None:
     """Record, list, or search lore entries (decisions/failures/learnings)."""
     from mindvault.lore import record, list_entries, search_lore, index_all_lore, LORE_TYPES
@@ -640,6 +715,21 @@ def main() -> None:
     sub_lore.add_argument("--query", help="Search query (for search action)")
     sub_lore.add_argument("--output-dir", default=None, help="MindVault output directory")
 
+    # rules
+    sub_rules = subparsers.add_parser("rules", help="Project rules engine (warn/block AI actions)")
+    sub_rules.add_argument("rules_action", choices=["add", "remove", "list", "check"], help="Rules action")
+    sub_rules.add_argument("--id", help="Rule ID")
+    sub_rules.add_argument("--trigger", help="Regex trigger pattern")
+    sub_rules.add_argument("--type", choices=["warn", "block"], default="warn", help="Rule type (warn or block)")
+    sub_rules.add_argument("--message", help="Warning/block message")
+    sub_rules.add_argument("--lore-ref", dest="lore_ref", help="Related lore reference")
+    sub_rules.add_argument("--scope", choices=["command", "output", "both"], default="both", help="Rule scope")
+    sub_rules.add_argument("--enabled", dest="enabled", action="store_true", default=True, help="Enable rule (default)")
+    sub_rules.add_argument("--disabled", dest="enabled", action="store_false", help="Disable rule")
+    sub_rules.add_argument("--context", choices=["command", "output", "both"], default="both", help="Context for check (command, output, or both)")
+    sub_rules.add_argument("--output-dir", default=None, help="MindVault output directory")
+    sub_rules.add_argument("text", nargs="?", default=None, help="Text to check (only for check action)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -661,6 +751,7 @@ def main() -> None:
         "daemon": cmd_daemon,
         "doctor": cmd_doctor,
         "lore": cmd_lore,
+        "rules": cmd_rules,
     }
 
     handler = commands.get(args.command)
