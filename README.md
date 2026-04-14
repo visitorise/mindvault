@@ -713,6 +713,18 @@ mindvault lint
 
 ---
 
+## 변경 내역 (v0.8.0)
+
+**검색 정확도 대폭 개선**: BM25 단독 → BM25 + TF-IDF 코사인 하이브리드 검색으로 업그레이드.
+
+- **하이브리드 스코어링**: BM25(70%) + TF-IDF 코사인 유사도(30%) 가중 조합. 키워드 매칭과 문서 수준 의미 유사도를 동시에 반영
+- **제목/헤딩 부스트**: 쿼리 토큰이 문서 제목에 있으면 2배, 헤딩에 있으면 1.5배 가중치. 핵심 문서가 상위 랭킹
+- **쿼리 토큰 확장**: camelCase, snake_case, kebab-case 자동 분리. `runIncremental` → `run` + `incremental` 검색
+- **동적 점수 필터**: 고정 임계값(10.0) → 상위 결과 대비 20% 미만 자동 제거. 쿼리마다 적응적 필터링
+- **검색 테스트 20개 추가** (총 218개)
+
+---
+
 ## 변경 내역 (v0.7.1)
 
 **Rules Engine 버그 수정**: 5개 버그 수정, 훅 안정성 개선.
@@ -889,5 +901,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.7.1 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.8.0 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

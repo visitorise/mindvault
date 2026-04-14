@@ -137,9 +137,12 @@ def cmd_query(args) -> None:
 
     result = query(args.question, output_dir, mode=args.mode, budget=args.budget)
 
-    # Format output — filter low-relevance search results to prevent
-    # noisy wiki page cascading (the "44K token" incident of 2026-04-12).
-    MIN_SEARCH_SCORE = 10.0
+    # Format output — dynamic threshold based on top result score.
+    # search.py already applies a 20% threshold internally; this is a
+    # display-level filter for the CLI output. Falls back to absolute
+    # minimum of 5.0 when the top score itself is very low.
+    top_score = result["search_results"][0]["score"] if result["search_results"] else 0
+    MIN_SEARCH_SCORE = max(top_score * 0.15, 5.0)
 
     print(f"\n=== Search Results (0 tokens) ===")
     if result["search_results"]:

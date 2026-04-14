@@ -715,6 +715,18 @@ mindvault lint
 
 ---
 
+## Changelog (v0.8.0)
+
+**Search accuracy overhaul**: Upgraded from BM25-only to BM25 + TF-IDF cosine hybrid search.
+
+- **Hybrid scoring**: BM25 (70%) + TF-IDF cosine similarity (30%) weighted combination. Captures both keyword matches and document-level semantic relevance
+- **Title/heading boost**: 2x boost for query terms in title, 1.5x for headings. Key documents rank higher
+- **Query token expansion**: Auto-splits camelCase, snake_case, kebab-case. `runIncremental` → `run` + `incremental`
+- **Dynamic score threshold**: Fixed threshold (10.0) → adaptive 20% of top score cutoff. Filters noise per-query
+- **20 new search tests** (218 total)
+
+---
+
 ## Changelog (v0.7.1)
 
 **Rules Engine bugfixes**: 5 bugs fixed, hook stability improved.
@@ -891,5 +903,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.7.1 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.8.0 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
