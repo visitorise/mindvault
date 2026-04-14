@@ -1,7 +1,83 @@
 <p align="center">
   <h1 align="center">MindVault</h1>
-  <p align="center">Long-term memory for AI coding tools — auto-converts codebases into knowledge graph + wiki + search index</p>
+  <p align="center"><s>Long-term memory for AI coding tools — auto-converts codebases into knowledge graph + wiki + search index</s></p>
 </p>
+
+> **This project has been deprecated (2026-04-14)**
+>
+> MindVault is no longer maintained. New installations are not recommended.
+> If you have it installed, see [Uninstall](#uninstall) below.
+
+---
+
+## Why Deprecated
+
+MindVault was inspired by [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), but was built on a fundamental misunderstanding of the original concept.
+
+### What Karpathy's LLM Wiki actually does
+
+- User puts any material into `raw/` folder
+- **LLM reads, understands, and synthesizes** it with existing `wiki/`
+- Wiki grows richer over time — **AI becomes smarter**
+
+### What MindVault actually did
+
+- Used **tree-sitter AST** instead of LLM to extract code structure (marketed "zero LLM tokens" as a feature)
+- Result: wiki pages containing structural listings (function names, imports, class names) — no understanding, no synthesis
+- The core of Karpathy's pattern — **"LLM understands and synthesizes"** — was missing
+
+### Promises that didn't work
+
+| Promise | Reality |
+|---------|---------|
+| **Token savings** (~900 tokens/query) | Injected irrelevant context every prompt — waste, not savings |
+| **Session continuity** | Could not carry over discussions from previous sessions (BM25 search quality limit) |
+| **Accurate auto-context** | Querying "MindVault improvement" returned YouTube pipeline docs as top result |
+
+### Lessons learned
+
+1. When borrowing someone else's concept, understand the original accurately
+2. "Working technically" is not the same as "delivering promised value"
+3. "No LLM needed" was marketed as a selling point, but removing the LLM removed the core value
+
+---
+
+## Uninstall
+
+```bash
+# 1. Stop and remove daemon
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.mindvault.watcher.plist 2>/dev/null
+rm -f ~/Library/LaunchAgents/com.mindvault.watcher.plist
+
+# 2. Remove global index
+rm -rf ~/.mindvault/
+
+# 3. Remove per-project output
+rm -rf mindvault-out/
+
+# 4. Uninstall pip package
+pip3 uninstall mindvault-ai -y
+
+# 5. Remove Claude Code hooks (if installed)
+# Delete mindvault entries from ~/.claude/settings.json
+# Delete ~/.claude/hooks/mindvault-*.sh
+# Delete ~/.claude/skills/mindvault/
+```
+
+---
+
+## Alternatives
+
+If you want to implement Karpathy's LLM Wiki pattern properly:
+
+- [llm-wiki-compiler](https://github.com/anthropics/llm-wiki-compiler) — LLM-based wiki compiler
+- RAG (Retrieval-Augmented Generation) frameworks
+- Built-in memory features of AI tools (Claude Code's `CLAUDE.md`, Cursor's `.cursorrules`, etc.)
+
+---
+
+<details>
+<summary>Original README below (for reference)</summary>
 
 <p align="center">
   <a href="https://pypi.org/project/mindvault-ai/"><img src="https://img.shields.io/pypi/v/mindvault-ai?color=blue" alt="PyPI"></a>
@@ -931,3 +1007,5 @@ MIT
 <p align="center">
   <sub>MindVault v0.9.0 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
+
+</details>

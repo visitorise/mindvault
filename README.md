@@ -1,7 +1,101 @@
 <p align="center">
   <h1 align="center">MindVault</h1>
-  <p align="center">AI 코딩 도구의 "장기 기억" — 코드베이스를 자동으로 지식 그래프 + 위키 + 검색 인덱스로 변환</p>
+  <p align="center"><s>AI 코딩 도구의 "장기 기억" — 코드베이스를 자동으로 지식 그래프 + 위키 + 검색 인덱스로 변환</s></p>
 </p>
+
+> **이 프로젝트는 폐기되었습니다 (2026-04-14)**
+>
+> MindVault는 더 이상 유지보수되지 않으며, 새로 설치하지 않는 것을 권장합니다.
+> 이미 설치한 사용자는 아래 [제거 방법](#제거-방법)을 참고해주세요.
+
+---
+
+## 폐기 사유
+
+MindVault는 [Andrej Karpathy의 LLM Wiki 패턴](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)에서 영감을 받아 만들었습니다. 하지만 개발 과정에서 원래 개념을 잘못 이해한 채 진행했고, 결과적으로 약속한 핵심 가치를 제공하지 못했습니다.
+
+### Karpathy LLM Wiki의 원래 개념
+
+- 사용자가 `raw/` 폴더에 아무 자료(문서, 논문, 메모 등)를 넣으면
+- **LLM이 읽고 이해해서** 기존 `wiki/`와 통합/병합하고
+- 위키가 점점 풍부해지면서 **AI가 더 영리해지는** 구조
+
+### MindVault가 실제로 한 것
+
+- LLM 대신 **tree-sitter AST**로 코드 구조만 추출 (LLM 불필요를 장점으로 내세움)
+- 결과: 함수명, import, 클래스명 같은 **구조적 나열**만 담긴 위키
+- Karpathy 패턴의 핵심인 **"LLM이 이해하고 합성"**이 빠져 있었음
+
+### 약속했지만 작동하지 않은 것들
+
+| 약속 | 현실 |
+|------|------|
+| **토큰 절약** (질의당 ~900 토큰) | 관련 없는 컨텍스트를 매 프롬프트마다 주입 → 절감이 아니라 낭비 |
+| **세션 연속성** | 직전 세션의 논의를 이어받지 못함 (BM25 검색 품질 한계) |
+| **정확한 컨텍스트 자동 주입** | "마인드볼트 개선"을 질문하면 유튜브 파이프라인 문서가 1등으로 올라옴 |
+
+### 근본 한계
+
+- "토큰 0으로 위키 생성"을 장점으로 만들었지만, 그것이 위키를 무가치하게 만든 원인
+- 토큰 절약 + 세션 연속성은 Anthropic도 완전히 해결하지 못한 문제 — 1인 개발자의 Python 패키지로 풀 수 있는 규모가 아니었음
+- BM25 키워드 매칭으로는 사용자의 의도를 이해할 수 없음 (한글 "마인드볼트" ≠ 영문 "MindVault")
+
+### 교훈
+
+1. 남의 개념을 차용할 때는 원본을 정확히 이해해야 합니다
+2. 기술적으로 작동하는 것과 약속한 가치를 제공하는 것은 다릅니다
+3. "LLM 불필요"를 셀링 포인트로 만들었지만, LLM이 빠지면서 핵심 가치가 사라졌습니다
+
+---
+
+## 제거 방법
+
+```bash
+# 1. 데몬 중지 및 삭제
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.mindvault.watcher.plist 2>/dev/null
+rm -f ~/Library/LaunchAgents/com.mindvault.watcher.plist
+
+# 2. 글로벌 인덱스 삭제
+rm -rf ~/.mindvault/
+
+# 3. 프로젝트별 출력 삭제 (각 프로젝트 폴더에서)
+rm -rf mindvault-out/
+
+# 4. pip 패키지 제거
+pip3 uninstall mindvault-ai -y
+
+# 5. Claude Code hook 제거 (설치했다면)
+# ~/.claude/settings.json에서 mindvault 관련 hook 항목 삭제
+# ~/.claude/hooks/mindvault-*.sh 파일 삭제
+# ~/.claude/skills/mindvault/ 폴더 삭제
+```
+
+### Windows / Linux 사용자
+
+```bash
+# Windows: Task Scheduler에서 MindVault 작업 삭제
+schtasks /delete /tn "MindVault Watcher" /f
+
+# Linux: systemd 서비스 중지 및 삭제
+systemctl --user stop mindvault-watcher
+systemctl --user disable mindvault-watcher
+rm ~/.config/systemd/user/mindvault-watcher.service
+```
+
+---
+
+## 대안
+
+Karpathy LLM Wiki 패턴을 실제로 구현하고 싶다면, 다음 도구들을 참고하세요:
+
+- [llm-wiki-compiler](https://github.com/anthropics/llm-wiki-compiler) — LLM 기반 위키 컴파일러
+- RAG (Retrieval-Augmented Generation) 프레임워크들
+- 각 AI 도구의 내장 메모리 기능 (Claude Code의 `CLAUDE.md`, Cursor의 `.cursorrules` 등)
+
+---
+
+<details>
+<summary>아래는 원래 README입니다 (참고용)</summary>
 
 <p align="center">
   <a href="https://pypi.org/project/mindvault-ai/"><img src="https://img.shields.io/pypi/v/mindvault-ai?color=blue" alt="PyPI"></a>
@@ -929,3 +1023,5 @@ MIT
 <p align="center">
   <sub>MindVault v0.9.0 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
+
+</details>
