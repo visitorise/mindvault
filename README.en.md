@@ -715,6 +715,20 @@ mindvault lint
 
 ---
 
+## Changelog (v0.9.0)
+
+**Smart context injection**: Complete auto-context hook overhaul. Fixes token waste.
+
+- **Prompt classifier**: Skips conversational prompts ("ok", "yes", exclamations), only injects for technical queries. Built-in Python regex classifier
+- **Telegram message skip**: Auto-skips prompts with `[텔레그램` prefix
+- **Hard budget cap**: Wiki 2000 tokens + 4000 char final guard. Previous 130K token blowup impossible
+- **Node ID truncation**: YouTube metadata node IDs (hundreds of chars) truncated to 80 chars
+- **Random wiki fallback removed**: No longer injects random wiki pages when search returns nothing
+- **Graph budget 25% cap**: Graph edges can't consume the entire token budget
+- Hook version: v4 → v5 (auto-upgrade via `mindvault install`)
+
+---
+
 ## Changelog (v0.8.1)
 
 **Wiki quality improvements**: Noise filtering + better community labels + rich Context section.
@@ -915,5 +929,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.8.1 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.9.0 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

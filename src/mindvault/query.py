@@ -317,12 +317,29 @@ def query(question: str, output_dir: Path, mode: str = "bfs", budget: int = 2000
     # === Step 3: Wiki Layer ===
     wiki_dir = output_dir / "wiki"
     wiki_context = ""
-    # Reserve ~200 tokens for graph edges, rest for wiki
+
+    # Strict budget: cap graph context to 25% of budget, rest for wiki.
+    # This prevents graph edges from eating the entire budget.
+    max_graph_tokens = budget // 4
     graph_edge_chars = sum(len(str(e)) for e in graph_context.get("edges", []))
-    graph_tokens = graph_edge_chars // 4
-    wiki_token_budget = budget - graph_tokens - 10  # small margin
-    if wiki_token_budget < 100:
-        wiki_token_budget = 100
+    graph_tokens = min(graph_edge_chars // 4, max_graph_tokens)
+
+    # If graph used too many tokens, trim edges
+    if graph_edge_chars // 4 > max_graph_tokens:
+        # Trim edges to fit budget
+        trimmed_edges = []
+        char_acc = 0
+        for e in graph_context.get("edges", []):
+            ec = len(str(e))
+            if char_acc + ec > max_graph_tokens * 4:
+                break
+            trimmed_edges.append(e)
+            char_acc += ec
+        graph_context["edges"] = trimmed_edges
+
+    wiki_token_budget = budget - graph_tokens - 50  # margin for headers
+    if wiki_token_budget < 200:
+        wiki_token_budget = 200
     char_limit = wiki_token_budget * 4
 
     if wiki_dir.exists():
@@ -332,21 +349,13 @@ def query(question: str, output_dir: Path, mode: str = "bfs", budget: int = 2000
             wp = wiki_dir / sr["path"]
             if wp.exists():
                 wiki_paths.append(wp)
-            # Also check lore entries (stored under lore/ prefix in index)
             if sr["path"].startswith("lore/"):
                 lore_path = output_dir / sr["path"]
                 if lore_path.exists():
                     wiki_paths.append(lore_path)
 
-        # Also look for wiki pages matching graph communities
-        if not wiki_paths:
-            # Fallback: try to find any wiki pages matching keywords
-            for md_file in sorted(wiki_dir.glob("*.md")):
-                if md_file.name == "INDEX.md":
-                    continue
-                wiki_paths.append(md_file)
-                if len(wiki_paths) >= 3:
-                    break
+        # NO fallback to random wiki pages — if search didn't find
+        # relevant pages, injecting random ones is worse than nothing.
 
         # Read wiki content up to budget
         parts = []

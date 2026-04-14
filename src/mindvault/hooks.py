@@ -9,34 +9,23 @@ _GIT_HOOK_MARKER = "# MindVault auto-update"
 
 # Bump this whenever the hook script gains a behavior change so old
 # broken installs get auto-overwritten on the next `mindvault install`.
-MINDVAULT_HOOK_VERSION = 4
+MINDVAULT_HOOK_VERSION = 5
 
 _PROMPT_HOOK_SCRIPT_TEMPLATE = '''#!/bin/bash
 # MindVault auto-context hook
-# MINDVAULT_HOOK_VERSION=4
+# MINDVAULT_HOOK_VERSION=5
 #
-# Reads stdin JSON (Claude Code UserPromptSubmit spec) and injects
-# `mindvault query` results into the user prompt as `<mindvault-context>`.
+# Smart context injection: only injects when the prompt is likely
+# code/project-related. Skips conversational, short, and command prompts.
 #
-# Why version 2:
-#   - v1 read `$CLAUDE_USER_PROMPT`, an env var that does not exist in
-#     the Claude Code hook environment. The script exited silently on
-#     every prompt and nothing was ever injected.
-#   - v1 also used `timeout`, which is not shipped on macOS by default
-#     (coreutils provides `gtimeout`). Pipe captures failed there too.
-#   - v1 ran with `set -e` implicitly in some code paths, so any of the
-#     above failures short-circuited the hook with no error message.
-# v2 fixes all three.
-
-# No `set -e` — any failure silently falls through so the user's prompt
-# still reaches Claude. Context injection is best-effort.
+# v5: Smart skip (conversational/short prompts), strict budget cap,
+#     node ID truncation, head-limit safety net.
 
 # 1) Read stdin (Claude Code hook contract)
 INPUT="$(cat 2>/dev/null || true)"
 [ -z "$INPUT" ] && exit 0
 
-# 2) Extract `prompt` field from the JSON payload. Falls back to treating
-# the entire stdin as plain text for manual testing.
+# 2) Extract prompt + cwd from JSON payload.
 PROMPT=$(printf '%s' "$INPUT" | python3 -c '
 import json, sys
 raw = sys.stdin.read()
@@ -54,15 +43,57 @@ except Exception:
     print(raw)
 ' 2>/dev/null)
 
-# 3) Basic filters
-[ ${#PROMPT} -lt 10 ] && exit 0
+# 3) Smart skip — don't inject for non-code prompts
+[ ${#PROMPT} -lt 20 ] && exit 0
 case "$PROMPT" in
     /*) exit 0 ;;
 esac
 
+# Skip purely conversational / short response prompts (Python classifier)
+SHOULD_SKIP=$(printf '%s' "$PROMPT" | python3 -c '
+import sys, re
+p = sys.stdin.read().strip().lower()
+
+# Skip: telegram prefix
+if p.startswith("[텔레그램") or p.startswith("[telegram"):
+    print("skip"); sys.exit()
+
+# Skip: very short (likely yes/no/ok/confirmation)
+if len(p) < 30 and not any(c in p for c in [".", "/", "_", "(", "{"]):
+    print("skip"); sys.exit()
+
+# Skip: conversational patterns (no technical content)
+CONV_PATTERNS = [
+    r"^(응|ㅇ|ㅋ|ㅎ|ㅇㅋ|ok|yes|no|nah|sure|yep|nope|alright|thanks|thx|고마워|ㄱㅅ|맞아|그래|좋아|알겠어|확인|완료)\s*[.!?]*$",
+    r"^(어|음|아|와|오|헐|대박|진짜|정말|그렇구나|그렇네)\s*[.!?]*$",
+]
+for pat in CONV_PATTERNS:
+    if re.match(pat, p):
+        print("skip"); sys.exit()
+
+# Has technical indicators → inject
+TECH_INDICATORS = [
+    r"\b(bug|fix|error|import|function|class|module|file|test|build|deploy|commit|push|merge|install)\b",
+    r"\b(코드|파일|함수|에러|버그|수정|빌드|배포|커밋|테스트|설치|구현|리팩토링)\b",
+    r"[A-Z][a-z]+[A-Z]",  # camelCase
+    r"[a-z]+_[a-z]+",     # snake_case
+    r"\.\w{2,4}\b",       # file extensions (.py, .ts, .json)
+    r"[/\\]\w+",          # file paths
+]
+for pat in TECH_INDICATORS:
+    if re.search(pat, p, re.IGNORECASE):
+        print("inject"); sys.exit()
+
+# Default: inject if > 50 chars (probably a real question), skip if short
+if len(p) > 50:
+    print("inject")
+else:
+    print("skip")
+' 2>/dev/null)
+
+[ "$SHOULD_SKIP" = "skip" ] && exit 0
+
 # 4) Need mindvault and a search index
-# The path below is resolved at install time. Falls back to PATH lookup
-# if the binary moves.
 MINDVAULT="{{MINDVAULT_PATH}}"
 if [ ! -x "$MINDVAULT" ]; then
     command -v mindvault >/dev/null 2>&1 && MINDVAULT="mindvault" || exit 0
@@ -75,8 +106,7 @@ elif [ ! -f "mindvault-out/search_index.json" ]; then
     exit 0
 fi
 
-# 5) Pick whichever timeout wrapper exists. macOS does not ship `timeout`
-# by default but `gtimeout` is available via `brew install coreutils`.
+# 5) Timeout wrapper
 TIMEOUT_CMD=""
 if command -v gtimeout >/dev/null 2>&1; then
     TIMEOUT_CMD="gtimeout 10"
@@ -84,11 +114,17 @@ elif command -v timeout >/dev/null 2>&1; then
     TIMEOUT_CMD="timeout 10"
 fi
 
-# 6) Run the query with explicit token budget (5000) and head-limit output.
-# Budget caps wiki context; head caps total line count as a safety net.
-RESULT=$($TIMEOUT_CMD "$MINDVAULT" query "$PROMPT" --budget 5000 $QUERY_ARGS 2>/dev/null | head -20)
+# 6) Run query with strict budget (2000 tokens) and hard line limit.
+# Budget 2000 = ~8KB of context, enough for 3 search results + key wiki excerpt.
+RESULT=$($TIMEOUT_CMD "$MINDVAULT" query "$PROMPT" --budget 2000 $QUERY_ARGS 2>/dev/null | head -30)
 
-# 7) Emit wrapped context so downstream prompts can see it.
+# 7) Final size guard: truncate to 4000 chars max (~1000 tokens)
+if [ ${#RESULT} -gt 4000 ]; then
+    RESULT="${RESULT:0:4000}
+... (truncated)"
+fi
+
+# 8) Emit wrapped context
 if [ -n "$RESULT" ]; then
     echo "<mindvault-context>"
     echo "$RESULT"

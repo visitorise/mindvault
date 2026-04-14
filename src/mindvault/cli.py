@@ -164,10 +164,17 @@ def cmd_query(args) -> None:
     else:
         print("  (no results)")
 
+    def _truncate_id(node_id: str, max_len: int = 80) -> str:
+        """Truncate long node IDs (e.g. YouTube metadata) for readable output."""
+        if len(node_id) <= max_len:
+            return node_id
+        return node_id[:max_len] + "..."
+
     print(f"\n=== Graph Context ===")
     gc = result["graph_context"]
     if gc["matched_nodes"]:
-        print(f"  Matched: {', '.join(gc['matched_nodes'][:10])}")
+        truncated = [_truncate_id(n) for n in gc["matched_nodes"][:10]]
+        print(f"  Matched: {', '.join(truncated)}")
         if len(gc["matched_nodes"]) > 10:
             print(f"  ... and {len(gc['matched_nodes']) - 10} more")
     else:
@@ -175,8 +182,8 @@ def cmd_query(args) -> None:
 
     if gc["neighbors"]:
         for edge in gc["edges"][:5]:
-            src = edge.get("source", "?")
-            tgt = edge.get("target", "?")
+            src = _truncate_id(edge.get("source", "?"))
+            tgt = _truncate_id(edge.get("target", "?"))
             rel = edge.get("relation", "->")
             print(f"  {src} --{rel}--> {tgt}")
         if len(gc["edges"]) > 5:

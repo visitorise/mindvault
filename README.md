@@ -713,6 +713,20 @@ mindvault lint
 
 ---
 
+## 변경 내역 (v0.9.0)
+
+**스마트 컨텍스트 주입**: auto-context hook 전면 개편. 토큰 낭비 문제 해결.
+
+- **프롬프트 분류기**: 대화("응", "확인", "와 대박")는 스킵, 기술 질문만 주입. 정규식 기반 Python 분류기 내장
+- **텔레그램 메시지 스킵**: `[텔레그램` 프리픽스 감지 시 자동 스킵
+- **예산 하드캡**: 위키 2000토큰 + 4000자 최종 가드. 이전 130K 토큰 폭주 불가
+- **노드 ID 절단**: 수백 자짜리 YouTube metadata 노드 ID를 80자로 절단
+- **랜덤 위키 폴백 제거**: 검색 결과 없으면 아무 위키나 주입하던 행동 제거
+- **그래프 예산 25% 캡**: 그래프 엣지가 전체 예산을 잡아먹지 못하도록 제한
+- 훅 버전: v4 → v5 (`mindvault install`로 자동 업그레이드)
+
+---
+
 ## 변경 내역 (v0.8.1)
 
 **위키 품질 개선**: 노이즈 필터링 + 커뮤니티 라벨 개선 + Context 섹션 강화.
@@ -913,5 +927,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.8.1 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.9.0 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

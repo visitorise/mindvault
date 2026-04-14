@@ -70,7 +70,7 @@ class TestPromptHookScriptTemplate:
 
     def test_respects_prompt_length_guard(self):
         """Very short prompts are noise — hook should skip them."""
-        assert "-lt 10" in _PROMPT_HOOK_SCRIPT_TEMPLATE
+        assert "-lt 20" in _PROMPT_HOOK_SCRIPT_TEMPLATE
 
     def test_slash_commands_skipped(self):
         """Slash commands go straight to Claude Code, not the hook."""
