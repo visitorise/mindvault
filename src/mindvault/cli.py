@@ -504,12 +504,14 @@ def cmd_rules(args) -> None:
 
     # Resolve output directory
     output_dir = Path(args.output_dir) if args.output_dir else Path("mindvault-out")
-    if action != "check" and not output_dir.exists():
+    if action in ("add", "remove"):
+        # Write operations always target local project directory (never fall
+        # through to global silently — requires explicit --output-dir to change).
+        output_dir.mkdir(parents=True, exist_ok=True)
+    elif not output_dir.exists():
         global_dir = Path.home() / ".mindvault"
         if global_dir.exists():
             output_dir = global_dir
-        else:
-            output_dir.mkdir(parents=True, exist_ok=True)
 
     if action == "add":
         if not args.id or not args.trigger or not args.message:

@@ -713,6 +713,19 @@ mindvault lint
 
 ---
 
+## 변경 내역 (v0.7.1)
+
+**Rules Engine 버그 수정**: 5개 버그 수정, 훅 안정성 개선.
+
+- **[High] NUL 바이트 파싱 수정**: `$()` 커맨드 치환이 NUL을 제거하여 Lore/Rules 훅의 필드 파싱이 깨지던 문제 → temp file 방식으로 교체
+- **[High] rules add/remove 글로벌 폴스루 수정**: `mindvault-out/`이 없을 때 규칙이 글로벌에 저장되던 문제 → 로컬 디렉토리 자동 생성
+- **[Medium] scope:both 중복 출력 수정**: command + output 양쪽 매칭 시 같은 규칙이 2번 출력되던 문제 → rule ID 기반 dedup
+- **[Medium] Lore→Rules 쉘 따옴표 수정**: 제목에 큰따옴표 포함 시 제안 명령어가 깨지던 문제 → `shlex.quote()` 적용
+- **[Low] 비ASCII 키워드 추출**: 한국어 제목에서 키워드 추출 실패 → Unicode-aware `\w+` 패턴
+- 훅 버전 범프: Lore v3→v4, Rules v2→v3 (`mindvault install`로 자동 업그레이드)
+
+---
+
 ## 변경 내역 (v0.7.0)
 
 **Rules Engine**: Lore에 기록된 실수를 **규칙으로 강제**합니다. AI가 도구를 사용할 때 규칙 위반을 자동 감지하여 `<rules-warning>` 또는 `<rules-block>` 태그를 주입합니다. '학습하는 AI'에서 '규칙을 따르는 AI'로의 업그레이드.

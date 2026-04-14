@@ -135,22 +135,34 @@ tags: [{tags_str}]
 
 def _suggest_rule(title: str, slug: str, lore_type: str) -> None:
     """Print a rule suggestion tag after recording a lore entry."""
-    # Build a simple trigger from the title keywords (lowercase, alpha only)
-    keywords = re.findall(r"[a-zA-Z]+", title.lower())
+    import shlex
+
+    # Build a simple trigger from the title keywords (Unicode-aware)
+    keywords = re.findall(r"\w+", title.lower())
+    keywords = [k for k in keywords if not k.isdigit()]
     if not keywords:
         return
     # Use the most distinctive keyword(s) as trigger
-    trigger_parts = [k for k in keywords if len(k) >= 3][:3]
+    trigger_parts = [k for k in keywords if len(k) >= 2][:3]
     if not trigger_parts:
         return
     trigger = "|".join(trigger_parts)
     rule_id = f"no-{slug[:30]}"
     rule_type = "warn"
 
+    cmd_parts = [
+        "mindvault", "rules", "add",
+        "--id", rule_id,
+        "--trigger", trigger,
+        "--type", rule_type,
+        "--message", f"See lore: {title}",
+    ]
+    safe_cmd = " ".join(shlex.quote(p) for p in cmd_parts)
+
     print(f"\n<lore-rule-suggestion>")
     print(f'Lore recorded: "{title}"')
     print(f"Prevent this from recurring with a rule:")
-    print(f'mindvault rules add --id "{rule_id}" --trigger "{trigger}" --type {rule_type} --message "See lore: {title}"')
+    print(safe_cmd)
     print(f"</lore-rule-suggestion>")
 
 

@@ -715,6 +715,19 @@ mindvault lint
 
 ---
 
+## Changelog (v0.7.1)
+
+**Rules Engine bugfixes**: 5 bugs fixed, hook stability improved.
+
+- **[High] NUL byte parsing fix**: `$()` command substitution stripped NUL bytes, breaking Lore/Rules hook field parsing → replaced with temp file approach
+- **[High] rules add/remove global fallthrough fix**: Rules were silently saved to global when `mindvault-out/` didn't exist → auto-create local directory
+- **[Medium] scope:both duplicate output fix**: Same rule printed twice when matching both command and output → rule ID dedup
+- **[Medium] Lore→Rules shell quoting fix**: Suggested command broke when title contained double quotes → `shlex.quote()` applied
+- **[Low] Non-ASCII keyword extraction**: Korean titles failed keyword extraction → Unicode-aware `\w+` pattern
+- Hook version bumps: Lore v3→v4, Rules v2→v3 (auto-upgrade via `mindvault install`)
+
+---
+
 ## Changelog (v0.7.0)
 
 **Rules Engine**: Enforces project-specific constraints by auto-injecting `<rules-warning>` or `<rules-block>` tags when AI tools violate rules. Upgrades MindVault from "learning AI" to "rule-following AI."

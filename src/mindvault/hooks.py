@@ -233,12 +233,12 @@ def install_prompt_hook() -> bool:
 
 _LORE_HOOK_SCRIPT_TEMPLATE = '''#!/bin/bash
 # MindVault Lore detection hook (PostToolUse)
-# MINDVAULT_LORE_HOOK_VERSION=3
+# MINDVAULT_LORE_HOOK_VERSION=4
 #
 # Detects lore-worthy events from Bash tool output (stdout + stderr + command)
 # and either auto-records, suggests, or shows a one-time onboarding notice.
 #
-# v3: Replaced eval with safe null-byte extraction to prevent command injection.
+# v4: Fixed NUL-byte corruption — $() strips NUL; now writes to temp file.
 
 # Read stdin JSON (Claude Code PostToolUse spec)
 INPUT=$(cat)
@@ -246,8 +246,13 @@ if [ -z "$INPUT" ]; then
     exit 0
 fi
 
-# Extract fields safely: Python outputs null-byte separated values
-EXTRACTED=$(printf '%s' "$INPUT" | python3 -c "
+# Extract fields safely: Python outputs null-byte separated values to a temp
+# file. Command substitution $() strips NUL bytes, so we redirect to a file
+# and read from it instead.
+_MV_TMP=$(mktemp)
+trap 'rm -f "$_MV_TMP"' EXIT
+
+printf '%s' "$INPUT" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -255,22 +260,21 @@ try:
     stdout = d.get('stdout', d.get('output', ''))[:2000]
     stderr = d.get('stderr', '')[:1000]
     cmd = d.get('command', d.get('input', ''))[:500]
-    sys.stdout.write(tool + '\\0')
-    sys.stdout.write(cmd + '\\0')
-    sys.stdout.write(stdout + '\\0')
-    sys.stdout.write(stderr + '\\0')
+    sys.stdout.buffer.write(tool.encode() + b'\\0')
+    sys.stdout.buffer.write(cmd.encode() + b'\\0')
+    sys.stdout.buffer.write(stdout.encode() + b'\\0')
+    sys.stdout.buffer.write(stderr.encode() + b'\\0')
 except:
-    sys.stdout.write('\\0\\0\\0\\0')
-" 2>/dev/null)
+    sys.stdout.buffer.write(b'\\0\\0\\0\\0')
+" > "$_MV_TMP" 2>/dev/null
 
-# Parse null-byte separated values
-IFS= read -r -d '' TOOL_NAME <<< "$EXTRACTED" || true
-REST="${EXTRACTED#*$'\\0'}"
-IFS= read -r -d '' CMD <<< "$REST" || true
-REST="${REST#*$'\\0'}"
-IFS= read -r -d '' STDOUT <<< "$REST" || true
-REST="${REST#*$'\\0'}"
-IFS= read -r -d '' STDERR <<< "$REST" || true
+# Parse null-byte separated values from file (preserves NUL unlike $())
+{
+    IFS= read -r -d '' TOOL_NAME
+    IFS= read -r -d '' CMD
+    IFS= read -r -d '' STDOUT
+    IFS= read -r -d '' STDERR
+} < "$_MV_TMP" 2>/dev/null || true
 
 # Only process Bash tool calls
 if [ "$TOOL_NAME" != "Bash" ]; then
@@ -424,7 +428,7 @@ def install_lore_hook() -> bool:
     if hook_path.exists():
         try:
             existing = hook_path.read_text(encoding="utf-8")
-            if "MINDVAULT_LORE_HOOK_VERSION=3" in existing and mindvault_bin in existing:
+            if "MINDVAULT_LORE_HOOK_VERSION=4" in existing and mindvault_bin in existing:
                 needs_write = False
         except (OSError, UnicodeDecodeError):
             pass
@@ -465,17 +469,16 @@ def install_lore_hook() -> bool:
     return True
 
 
-MINDVAULT_RULES_HOOK_VERSION = 2
+MINDVAULT_RULES_HOOK_VERSION = 3
 
 _RULES_HOOK_SCRIPT_TEMPLATE = '''#!/bin/bash
 # MindVault Rules Engine hook (PostToolUse)
-# MINDVAULT_RULES_HOOK_VERSION=2
+# MINDVAULT_RULES_HOOK_VERSION=3
 #
 # Checks tool input/output against project rules and injects
 # <rules-warning> or <rules-block> tags when violations are found.
 #
-# v2: Replaced eval with safe read-based extraction. Two separate
-#     check calls with --context for proper scope filtering.
+# v3: Fixed NUL-byte corruption (temp file) + deduplicate scope:both matches.
 
 # Read stdin JSON (Claude Code PostToolUse spec)
 INPUT=$(cat)
@@ -483,9 +486,12 @@ if [ -z "$INPUT" ]; then
     exit 0
 fi
 
-# Extract fields safely: Python outputs null-byte separated values,
-# shell reads them with read -d ''.
-EXTRACTED=$(printf '%s' "$INPUT" | python3 -c "
+# Extract fields safely: write NUL-separated values to temp file
+# ($() strips NUL bytes, so we redirect to a file instead).
+_MV_TMP=$(mktemp)
+trap 'rm -f "$_MV_TMP"' EXIT
+
+printf '%s' "$INPUT" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -493,22 +499,21 @@ try:
     stdout = d.get('stdout', d.get('output', ''))[:2000]
     stderr = d.get('stderr', '')[:1000]
     cmd = d.get('command', d.get('input', ''))[:500]
-    sys.stdout.write(tool + '\\0')
-    sys.stdout.write(cmd + '\\0')
-    sys.stdout.write(stdout + '\\0')
-    sys.stdout.write(stderr + '\\0')
+    sys.stdout.buffer.write(tool.encode() + b'\\0')
+    sys.stdout.buffer.write(cmd.encode() + b'\\0')
+    sys.stdout.buffer.write(stdout.encode() + b'\\0')
+    sys.stdout.buffer.write(stderr.encode() + b'\\0')
 except:
-    sys.stdout.write('\\0\\0\\0\\0')
-" 2>/dev/null)
+    sys.stdout.buffer.write(b'\\0\\0\\0\\0')
+" > "$_MV_TMP" 2>/dev/null
 
-# Parse null-byte separated values
-IFS= read -r -d '' TOOL_NAME <<< "$EXTRACTED" || true
-REST="${EXTRACTED#*$'\\0'}"
-IFS= read -r -d '' CMD <<< "$REST" || true
-REST="${REST#*$'\\0'}"
-IFS= read -r -d '' STDOUT <<< "$REST" || true
-REST="${REST#*$'\\0'}"
-IFS= read -r -d '' STDERR <<< "$REST" || true
+# Parse null-byte separated values from file (preserves NUL unlike $())
+{
+    IFS= read -r -d '' TOOL_NAME
+    IFS= read -r -d '' CMD
+    IFS= read -r -d '' STDOUT
+    IFS= read -r -d '' STDERR
+} < "$_MV_TMP" 2>/dev/null || true
 
 if [ -z "$CMD" ] && [ -z "$STDOUT" ] && [ -z "$STDERR" ]; then
     exit 0
@@ -546,8 +551,23 @@ ${R2}"
     fi
 fi
 
+# Deduplicate rules matched in both command and output contexts (scope:both)
 if [ -n "$RESULT" ]; then
-    echo "$RESULT"
+    printf '%s' "$RESULT" | python3 -c "
+import sys, re
+text = sys.stdin.read()
+blocks = re.findall(r'(<rules-(?:warning|block)>.*?</rules-(?:warning|block)>)', text, re.DOTALL)
+seen = set()
+for block in blocks:
+    m = re.search(r'Rule: (.+)', block)
+    if m:
+        rid = m.group(1).strip()
+        if rid not in seen:
+            seen.add(rid)
+            print(block)
+    else:
+        print(block)
+" 2>/dev/null
 fi
 
 exit 0
