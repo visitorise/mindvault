@@ -74,7 +74,14 @@ def cmd_install(args) -> None:
     else:
         print(f"  \u2717 Auto-context hook \u2014 installation failed")
 
-    # 6. Install daemon (auto-update every 5 min) unless --no-daemon
+    # 6. Install Lore detection hook (lazy onboarding — shows notice on first detection)
+    from mindvault.hooks import install_lore_hook
+    if install_lore_hook():
+        print(f"  \u2713 Lore hook \u2014 installed (detects decisions/failures)")
+    else:
+        print(f"  \u2717 Lore hook \u2014 installation failed")
+
+    # 7. Install daemon (auto-update every 5 min) unless --no-daemon
     if not getattr(args, "no_daemon", False):
         from mindvault.daemon import install_daemon, daemon_status
         status = daemon_status()
@@ -482,8 +489,73 @@ def cmd_daemon(args) -> None:
         sys.exit(1)
 
 
+def cmd_lore(args) -> None:
+    """Record, list, or search lore entries (decisions/failures/learnings)."""
+    from mindvault.lore import record, list_entries, search_lore, index_all_lore, LORE_TYPES
+
+    action = args.lore_action
+
+    # Resolve output directory
+    output_dir = Path(args.output_dir) if args.output_dir else Path("mindvault-out")
+    if not output_dir.exists():
+        # Try global
+        global_dir = Path.home() / ".mindvault"
+        if global_dir.exists():
+            output_dir = global_dir
+        else:
+            print("No MindVault data found. Run `mindvault ingest .` first.")
+            sys.exit(1)
+
+    if action == "setup":
+        from mindvault.lore import setup_lore
+        setup_lore(interactive=True)
+        return
+
+    if action == "record":
+        if not args.title:
+            print("Error: --title is required for record")
+            sys.exit(1)
+        filepath = record(
+            output_dir=output_dir,
+            title=args.title,
+            context=args.context or "",
+            outcome=args.outcome or "",
+            lore_type=args.type or "decision",
+            tags=[t.strip() for t in args.tags.split(",")] if args.tags else None,
+        )
+        print(f"Lore recorded: {filepath.name}")
+
+    elif action == "list":
+        entries = list_entries(output_dir, lore_type=args.type)
+        if not entries:
+            print("No lore entries found.")
+            return
+        for entry in entries:
+            type_icon = {"decision": "→", "failure": "✗", "learning": "◆",
+                         "rollback": "↩", "tradeoff": "⇌"}.get(entry["type"], "•")
+            tags = f" [{', '.join(entry['tags'])}]" if entry["tags"] else ""
+            print(f"  {type_icon} [{entry['date']}] {entry['title']}{tags}")
+
+    elif action == "search":
+        if not args.query:
+            print("Error: --query is required for search")
+            sys.exit(1)
+        results = search_lore(output_dir, args.query)
+        if not results:
+            print("No matching lore entries.")
+            return
+        for r in results:
+            print(f"  [{r['score']:.1f}] {r['title']}")
+            if r.get("snippet"):
+                print(f"         {r['snippet'][:80]}...")
+
+    elif action == "reindex":
+        count = index_all_lore(output_dir)
+        print(f"Indexed {count} lore entries.")
+
+
 def main() -> None:
-    """CLI entry point. Subcommands: install, query, ingest, lint, status, watch, global, daemon."""
+    """CLI entry point. Subcommands: install, query, ingest, lint, status, watch, global, daemon, lore."""
     parser = argparse.ArgumentParser(
         prog="mindvault",
         description="MindVault — unified knowledge management: Search + Graph + Wiki",
@@ -557,6 +629,17 @@ def main() -> None:
         help="Diagnose auto-context hook (v0.4.2+)",
     )
 
+    # lore
+    sub_lore = subparsers.add_parser("lore", help="Decision/failure recording (Lore system)")
+    sub_lore.add_argument("lore_action", choices=["record", "list", "search", "reindex", "setup"], help="Lore action")
+    sub_lore.add_argument("--title", help="Decision/failure title")
+    sub_lore.add_argument("--context", help="Why this decision was made")
+    sub_lore.add_argument("--outcome", help="What was the result / what was learned")
+    sub_lore.add_argument("--type", choices=["decision", "failure", "learning", "rollback", "tradeoff"], help="Entry type")
+    sub_lore.add_argument("--tags", help="Comma-separated tags")
+    sub_lore.add_argument("--query", help="Search query (for search action)")
+    sub_lore.add_argument("--output-dir", default=None, help="MindVault output directory")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -577,6 +660,7 @@ def main() -> None:
         "global": cmd_global,
         "daemon": cmd_daemon,
         "doctor": cmd_doctor,
+        "lore": cmd_lore,
     }
 
     handler = commands.get(args.command)

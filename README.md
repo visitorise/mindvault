@@ -703,6 +703,32 @@ mindvault lint
 
 ---
 
+## 변경 내역 (v0.6.0)
+
+**Lore 시스템**: AI가 내린 결정, 실패, 학습을 기록하여 다음 세션에서 "왜 이렇게 됐는지" 맥락을 제공합니다. '기억하는 AI'에서 '학습하는 AI'로의 업그레이드.
+
+- **`lore.py`**: 핵심 모듈 — `record()`, `list_entries()`, `search_lore()`, `index_all_lore()`, `setup_lore()`
+- **5가지 기록 유형**: `decision`, `failure`, `learning`, `rollback`, `tradeoff`
+- **Lazy Onboarding**: 설치 시 추가 설정 없음. 롤백/테스트 실패 등이 감지되면 1회 안내 후 사용자가 자동화 설정 선택
+- **PostToolUse 감지 hook**: Bash 도구 실행 시 5가지 패턴 자동 감지 (rollback, test_failure, dependency, architecture, build_fix)
+- **패턴별 3단계 설정**: `auto`(자동 기록), `ask`(사용자에게 질문), `ignore`(무시)
+- **`mindvault lore setup`**: 인터랙티브 온보딩 — 패턴별 추천 설정 포함
+- **파이프라인 통합**: lore 항목이 검색 인덱스에 자동 포함 → `mindvault query`로 즉시 검색 가능
+- **테스트 17개 추가**
+
+**사용법:**
+```bash
+# 수동 기록
+mindvault lore record --title "Redis 캐시 롤백" --type rollback --context "위젯 동기화 충돌" --outcome "SQLite로 대체"
+
+# 자동화 설정 (인터랙티브)
+mindvault lore setup
+
+# 기록 목록 / 검색
+mindvault lore list
+mindvault lore search --query "캐시"
+```
+
 ## 변경 내역 (v0.5.0)
 
 **구조화 데이터 인덱싱**: `.json`, `.yaml`, `.yml` 파일을 자동으로 검색 인덱스와 지식 그래프에 포함합니다. 프로젝트 산출물(메타데이터, 설정, 빌드 결과)에 담긴 지식이 더 이상 누락되지 않습니다.
@@ -811,5 +837,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.5.0 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.6.0 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

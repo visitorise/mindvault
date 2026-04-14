@@ -54,6 +54,11 @@ def run(source_dir: Path, output_dir: Path = None, **kwargs) -> dict:
         _index_data_files(source_dir, data_files, index_path)
         index_docs += len(data_files)
 
+    # Index lore entries (decisions/failures/learnings)
+    from mindvault.lore import index_all_lore
+    lore_count = index_all_lore(output_dir)
+    index_docs += lore_count
+
     result["index_docs"] = index_docs
     return result
 

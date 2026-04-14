@@ -705,6 +705,32 @@ mindvault lint
 
 ---
 
+## Changelog (v0.6.0)
+
+**Lore System**: Records decisions, failures, and learnings so your AI remembers *why* things changed — not just *what* changed. Upgrades MindVault from "remembering AI" to "learning AI."
+
+- **`lore.py`**: Core module — `record()`, `list_entries()`, `search_lore()`, `index_all_lore()`, `setup_lore()`
+- **5 entry types**: `decision`, `failure`, `learning`, `rollback`, `tradeoff`
+- **Lazy Onboarding**: No setup at install time. When a rollback/test failure is detected, a one-time notice introduces the feature — user decides if/how to automate
+- **PostToolUse detection hook**: Auto-detects 5 patterns from Bash output (rollback, test_failure, dependency, architecture, build_fix)
+- **3-tier per-pattern config**: `auto` (record silently), `ask` (AI asks user), `ignore` (skip)
+- **`mindvault lore setup`**: Interactive onboarding with recommended defaults
+- **Pipeline integration**: Lore entries auto-indexed into search → queryable via `mindvault query`
+- **17 new tests**
+
+**Usage:**
+```bash
+# Manual recording
+mindvault lore record --title "Redis cache rollback" --type rollback --context "Widget sync conflict" --outcome "Switched to SQLite"
+
+# Automation setup (interactive)
+mindvault lore setup
+
+# List / search entries
+mindvault lore list
+mindvault lore search --query "cache"
+```
+
 ## Changelog (v0.5.0)
 
 **Structured data indexing**: `.json`, `.yaml`, `.yml` files are now automatically included in the search index and knowledge graph. Knowledge embedded in project outputs (metadata, configs, build artifacts) is no longer missed.
@@ -813,5 +839,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.5.0 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.6.0 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

@@ -9,7 +9,7 @@ _GIT_HOOK_MARKER = "# MindVault auto-update"
 
 # Bump this whenever the hook script gains a behavior change so old
 # broken installs get auto-overwritten on the next `mindvault install`.
-MINDVAULT_HOOK_VERSION = 3
+MINDVAULT_HOOK_VERSION = 4
 
 _PROMPT_HOOK_SCRIPT_TEMPLATE = '''#!/bin/bash
 # MindVault auto-context hook
@@ -222,6 +222,223 @@ def install_prompt_hook() -> bool:
                 "type": "command",
                 "command": str(hook_path),
             }]
+        })
+
+    settings_path.write_text(
+        json.dumps(settings, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return True
+
+
+_LORE_HOOK_SCRIPT_TEMPLATE = '''#!/bin/bash
+# MindVault Lore detection hook (PostToolUse)
+# MINDVAULT_LORE_HOOK_VERSION=1
+#
+# Detects lore-worthy events (rollbacks, test failures, etc.) from
+# Bash tool output and injects a one-time suggestion into the context.
+# Does NOT auto-record — suggests to the AI which then asks the user.
+
+# Read stdin JSON (Claude Code PostToolUse spec)
+INPUT=$(cat)
+if [ -z "$INPUT" ]; then
+    exit 0
+fi
+
+# Extract tool name and output
+TOOL_NAME=$(echo "$INPUT" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print(d.get('tool_name', d.get('toolName', '')))
+except: pass
+" 2>/dev/null)
+
+# Only process Bash tool calls
+if [ "$TOOL_NAME" != "Bash" ]; then
+    exit 0
+fi
+
+# Extract stdout from the tool result
+STDOUT=$(echo "$INPUT" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    out = d.get('stdout', d.get('output', ''))
+    print(out[:2000])
+except: pass
+" 2>/dev/null)
+
+if [ -z "$STDOUT" ]; then
+    exit 0
+fi
+
+# Check if lore notice was already shown this install
+NOTICE_FLAG="$HOME/.mindvault/.lore-noticed"
+LORE_CONFIG="$HOME/.mindvault/lore-config.json"
+
+# If lore is already configured, use configured behavior
+if [ -f "$LORE_CONFIG" ]; then
+    # Lore is configured — detect patterns and suggest based on config
+    DETECTED=""
+    LORE_TYPE=""
+    SUGGESTED_TITLE=""
+
+    # Pattern: git revert/reset
+    if echo "$STDOUT" | grep -qiE "Revert|revert.*commit|reset.*hard|HEAD is now at"; then
+        DETECTED="rollback"
+        LORE_TYPE="rollback"
+        SUGGESTED_TITLE="Code rollback detected"
+    fi
+
+    # Pattern: repeated test failure
+    if echo "$STDOUT" | grep -qiE "FAILED|ERRORS|tests? failed|AssertionError|pytest.*failed"; then
+        DETECTED="test_failure"
+        LORE_TYPE="failure"
+        SUGGESTED_TITLE="Test failure detected"
+    fi
+
+    # Pattern: dependency change
+    if echo "$STDOUT" | grep -qiE "npm install|pip install|added [0-9]+ package|Successfully installed"; then
+        DETECTED="dependency"
+        LORE_TYPE="decision"
+        SUGGESTED_TITLE="Dependency change"
+    fi
+
+    if [ -z "$DETECTED" ]; then
+        exit 0
+    fi
+
+    # Check config for this pattern's action
+    ACTION=$(python3 -c "
+import json, sys
+try:
+    with open('$LORE_CONFIG') as f:
+        cfg = json.load(f)
+    print(cfg.get('patterns', {}).get('$DETECTED', 'ask'))
+except: print('ask')
+" 2>/dev/null)
+
+    if [ "$ACTION" = "ignore" ]; then
+        exit 0
+    fi
+
+    MINDVAULT="{{MINDVAULT_PATH}}"
+    if [ ! -x "$MINDVAULT" ]; then
+        command -v mindvault >/dev/null 2>&1 && MINDVAULT="mindvault" || exit 0
+    fi
+
+    if [ "$ACTION" = "auto" ]; then
+        # Auto-record with basic info
+        $MINDVAULT lore record --title "$SUGGESTED_TITLE" --type "$LORE_TYPE" --context "Auto-detected from tool output" --outcome "Pending user review" 2>/dev/null
+        echo "<lore-auto-recorded>"
+        echo "Lore auto-recorded: $SUGGESTED_TITLE (type: $LORE_TYPE)"
+        echo "Review with: mindvault lore list"
+        echo "</lore-auto-recorded>"
+    else
+        # Ask mode — suggest to AI
+        echo "<lore-suggestion>"
+        echo "Detected: $SUGGESTED_TITLE"
+        echo "Suggested command: mindvault lore record --title \"...\" --type $LORE_TYPE --context \"...\" --outcome \"...\""
+        echo "Ask the user if they want to record this decision/failure in Lore."
+        echo "</lore-suggestion>"
+    fi
+
+    exit 0
+fi
+
+# Lore NOT configured yet — check if we should show one-time notice
+if [ -f "$NOTICE_FLAG" ]; then
+    exit 0  # Already shown once
+fi
+
+# Detect any lore-worthy pattern to trigger the notice
+SHOULD_NOTICE=false
+if echo "$STDOUT" | grep -qiE "Revert|revert.*commit|reset.*hard|HEAD is now at"; then
+    SHOULD_NOTICE=true
+fi
+if echo "$STDOUT" | grep -qiE "FAILED|ERRORS|tests? failed|AssertionError|pytest.*failed"; then
+    SHOULD_NOTICE=true
+fi
+
+if [ "$SHOULD_NOTICE" = "false" ]; then
+    exit 0
+fi
+
+# Show one-time lore notice
+mkdir -p "$HOME/.mindvault"
+touch "$NOTICE_FLAG"
+
+echo "<lore-notice>"
+echo "MindVault detected a significant event (rollback or test failure)."
+echo "MindVault Lore can automatically track decisions, failures, and learnings"
+echo "so your AI remembers WHY things changed — not just WHAT changed."
+echo ""
+echo "Currently: manual only (mindvault lore record --title '...')"
+echo "Setup automation: mindvault lore setup"
+echo ""
+echo "Tell the user about this feature and ask if they want to set it up."
+echo "This notice appears only once."
+echo "</lore-notice>"
+
+exit 0
+'''
+
+
+def install_lore_hook() -> bool:
+    """Install the PostToolUse lore detection hook.
+
+    Detects lore-worthy events (rollbacks, test failures) from Bash
+    tool output and either auto-records, suggests, or ignores based
+    on user configuration. Shows a one-time notice on first detection
+    if lore is not yet configured (lazy onboarding).
+
+    Returns:
+        True if installed successfully.
+    """
+    hooks_dir = Path.home() / ".claude" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / "mindvault-lore-hook.sh"
+
+    mindvault_bin = _resolve_mindvault_path()
+    script = _LORE_HOOK_SCRIPT_TEMPLATE.replace("{{MINDVAULT_PATH}}", mindvault_bin)
+
+    needs_write = True
+    if hook_path.exists():
+        try:
+            existing = hook_path.read_text(encoding="utf-8")
+            if "MINDVAULT_LORE_HOOK_VERSION=1" in existing and mindvault_bin in existing:
+                needs_write = False
+        except (OSError, UnicodeDecodeError):
+            pass
+
+    if needs_write:
+        hook_path.write_text(script, encoding="utf-8")
+    hook_path.chmod(0o755)
+
+    # Register in settings.json
+    settings_path = Path.home() / ".claude" / "settings.json"
+    settings = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            settings = {}
+
+    hooks = settings.setdefault("hooks", {})
+    post_tool_hooks = hooks.setdefault("PostToolUse", [])
+
+    already_installed = any(
+        "mindvault-lore-hook" in str(h.get("hooks", h.get("command", "")))
+        for h in post_tool_hooks
+    )
+    if not already_installed:
+        post_tool_hooks.append({
+            "matcher": "Bash",
+            "hooks": [{
+                "type": "command",
+                "command": str(hook_path),
+            }],
         })
 
     settings_path.write_text(
