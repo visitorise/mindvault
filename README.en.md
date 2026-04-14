@@ -715,6 +715,18 @@ mindvault lint
 
 ---
 
+## Changelog (v0.8.1)
+
+**Wiki quality improvements**: Noise filtering + better community labels + rich Context section.
+
+- **Noise node filtering**: Excludes `__unresolved__` refs, isolated nodes (degree 0), and generic nodes from wiki clustering
+- **Small community merging**: Communities with <3 nodes auto-merged into their best-connected neighbor
+- **Source-file-based labels**: Uses filename as label when 50%+ of community members share the same source file
+- **Rich Context section**: Hub nodes, node type distribution, key relations, external dependency count
+- **INDEX.md collision fix**: Reserved slugs ("index", "readme", etc.) get `-community` suffix
+
+---
+
 ## Changelog (v0.8.0)
 
 **Search accuracy overhaul**: Upgraded from BM25-only to BM25 + TF-IDF cosine hybrid search.
@@ -903,5 +915,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.8.0 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.8.1 | Built by <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>

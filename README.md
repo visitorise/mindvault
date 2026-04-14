@@ -713,6 +713,18 @@ mindvault lint
 
 ---
 
+## 변경 내역 (v0.8.1)
+
+**위키 품질 개선**: 노이즈 필터링 + 커뮤니티 라벨 개선 + Context 섹션 강화.
+
+- **노이즈 노드 필터링**: `__unresolved__` 참조, 고립 노드(degree 0), 제너릭 노드를 위키 클러스터링에서 제외
+- **작은 커뮤니티 병합**: 3개 미만 노드 커뮤니티를 가장 연결이 많은 이웃 커뮤니티에 자동 병합
+- **소스파일 기반 라벨**: 커뮤니티 멤버의 50%+ 가 같은 파일이면 파일명을 라벨로 사용 (기존: "funcA & funcB")
+- **Context 섹션 강화**: Hub nodes, Node types 분포, Key relations, External dependencies 포함
+- **INDEX.md 충돌 방지**: "index" 등 예약 slug에 `-community` 접미사 자동 추가
+
+---
+
 ## 변경 내역 (v0.8.0)
 
 **검색 정확도 대폭 개선**: BM25 단독 → BM25 + TF-IDF 코사인 하이브리드 검색으로 업그레이드.
@@ -901,5 +913,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>MindVault v0.8.0 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
+  <sub>MindVault v0.8.1 | 개발: <a href="https://github.com/etinpres">etinpres</a></sub>
 </p>
